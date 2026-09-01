@@ -1,0 +1,13 @@
+/_build/
+/cover/
+/deps/
+/doc/
+/.fetch
+/.elixir_ls/
+erl_crash.dump
+*.ez
+*.beam
+mutare_phoenix_swoosh-*.tar
+
+# Dialyzer PLTs (rebuildable cache)
+/priv/plts/
