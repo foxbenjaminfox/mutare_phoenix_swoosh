@@ -8,7 +8,7 @@ defmodule Mutare.Phoenix.SwooshTest do
 
   import Mutare.Test
 
-  alias Mutare.Phoenix.Swoosh.{Layout, RenderBody}
+  alias Mutare.Phoenix.Swoosh.{Layout, LayoutConfigured, RenderBody}
   alias Mutare.UseExpansion.Expansion
 
   doctest Mutare.Phoenix.Swoosh
@@ -55,6 +55,36 @@ defmodule Mutare.Phoenix.SwooshTest do
     end
 
     defp context, do: %{module: Sample.UserEmail, opts: []}
+  end
+
+  # The compile-time `layout:` option cannot host a mutant, but whether it is *there* decides
+  # whether suppressing the layout at the render site is a real mutant or an equivalent one.
+  # The marker is how that fact crosses into `Mutare.Phoenix.Swoosh.Layout`'s context.
+  describe "the LayoutConfigured marker" do
+    test "a configured layout is reported as the marker" do
+      args = [quote(do: [view: Sample.EmailView, layout: {Sample.LayoutView, :email}])]
+
+      assert %Expansion{behaviours: [LayoutConfigured]} =
+               Mutare.Phoenix.Swoosh.expand_use(Phoenix.Swoosh, args, context())
+    end
+
+    test "a computed layout counts as configured" do
+      args = [quote(do: [view: Sample.EmailView, layout: @layout])]
+
+      assert %Expansion{behaviours: [LayoutConfigured]} =
+               Mutare.Phoenix.Swoosh.expand_use(Phoenix.Swoosh, args, context())
+    end
+
+    test "no layout option, or phoenix_swoosh's own `false` default, reports nothing" do
+      absent = [quote(do: [view: Sample.EmailView])]
+      explicit = [quote(do: [view: Sample.EmailView, layout: false])]
+      computed_opts = [quote(do: mailer_opts())]
+
+      for args <- [absent, explicit, computed_opts] do
+        assert %Expansion{behaviours: []} =
+                 Mutare.Phoenix.Swoosh.expand_use(Phoenix.Swoosh, args, context())
+      end
+    end
   end
 
   # The reason the override exists, pinned as behaviour: Mutare's in-process expansion of

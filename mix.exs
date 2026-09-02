@@ -29,7 +29,7 @@ defmodule Mutare.Phoenix.Swoosh.MixProject do
 
   defp description do
     "Custom Mutare mutators for the phoenix_swoosh template-rendering surface — " <>
-      "render_body removal and narrowing, and the mailer layout seam."
+      "render_body removal, template and format narrowing, and the mailer layout seam."
   end
 
   # Hex package metadata. The `mutare_swoosh` base package (and through it the
@@ -109,7 +109,11 @@ defmodule Mutare.Phoenix.Swoosh.MixProject do
         "Mutator families": [
           Mutare.Phoenix.Swoosh.RenderBody,
           Mutare.Phoenix.Swoosh.Layout
-        ]
+        ],
+        # Not a behaviour anyone implements — the channel the `use` expansion uses to tell
+        # `:mail_layout` that a layout is configured. Documented because a reader of a
+        # `mail_layout:off` mutant will want to know why it fired here and not there.
+        Marker: [Mutare.Phoenix.Swoosh.LayoutConfigured]
       ]
     ]
   end

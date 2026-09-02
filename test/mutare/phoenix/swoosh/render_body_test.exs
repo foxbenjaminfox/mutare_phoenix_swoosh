@@ -1,9 +1,10 @@
 defmodule Mutare.Phoenix.Swoosh.RenderBodyTest do
   @moduledoc """
-  `:render_body` — whole-call removal (non-piped → the email, piped → `Function.identity()`)
-  plus atom-template narrowing to the two string forms, across bare (`use`-style, both
-  wrapper arities), qualified, aliased, and piped call sites; the template position's
-  registry `:skip` pin with its control; variant labels; and the arity/locality guards.
+  `:render_body` — whole-call removal (non-piped → the email, piped → `Function.identity()`),
+  atom-template narrowing to the two string forms, and per-entry dropping of a literal
+  `put_new_formats/2` map, across bare (`use`-style, both wrapper arities), qualified, aliased,
+  and piped call sites; the template and format positions' registry `:skip` pins with their
+  controls; variant labels; and the arity/locality guards.
   """
   use ExUnit.Case, async: true
 
@@ -149,6 +150,78 @@ defmodule Mutare.Phoenix.Swoosh.RenderBodyTest do
     end
   end
 
+  describe "format dropping" do
+    test "a literal map loses one entry per mutant" do
+      source =
+        mailer("""
+          def go(e) do
+            put_new_formats(e, %{"html" => :html_body, "amp" => :html_body})
+          end
+        """)
+
+      assert rb_diffs(source) == [
+               {~s|put_new_formats(e, %{"html" => :html_body, "amp" => :html_body})|,
+                ~s|put_new_formats(e, %{"amp" => :html_body})|},
+               {~s|put_new_formats(e, %{"html" => :html_body, "amp" => :html_body})|,
+                ~s|put_new_formats(e, %{"html" => :html_body})|}
+             ]
+    end
+
+    test "a piped stage keeps its written form" do
+      source =
+        mailer("""
+          def go(e) do
+            e |> put_new_formats(%{"html" => :html_body, "text" => :text_body})
+          end
+        """)
+
+      assert rb_diffs(source) == [
+               {~s|put_new_formats(%{"html" => :html_body, "text" => :text_body})|,
+                ~s|put_new_formats(%{"text" => :text_body})|},
+               {~s|put_new_formats(%{"html" => :html_body, "text" => :text_body})|,
+                ~s|put_new_formats(%{"html" => :html_body})|}
+             ]
+    end
+
+    # Dropping the only format renders no body at all — the `remove` mutant's diff, and a
+    # mutant has exactly one home.
+    test "a single-entry map produces nothing" do
+      source = mailer(~s|  def go(e), do: put_new_formats(e, %{"mjml" => :html_body})|)
+
+      assert rb_diffs(source) == []
+    end
+
+    test "an opaque formats value produces nothing" do
+      assert rb_diffs(mailer("  def go(e, formats), do: put_new_formats(e, formats)")) == []
+    end
+
+    test "a wrong-arity qualified call is left alone" do
+      source = "defmodule M do\n  def go(e), do: Phoenix.Swoosh.put_new_formats(e)\nend\n"
+
+      assert rb_diffs(source) == []
+    end
+  end
+
+  describe "the format map's registry :skip pin" do
+    test "core's value families leave the map alone when this family is enabled" do
+      source = mailer(~s|  def go(e), do: put_new_formats(e, %{"mjml" => :html_body})|)
+      mutators = [Mutare.Mutators.AtomLiteral, Mutare.Mutators.StringLiteral, RenderBody]
+
+      assert diffs(source, mutators, @ext) == []
+    end
+
+    test "control: without this family the map's strings are fair game" do
+      source = mailer(~s|  def go(e), do: put_new_formats(e, %{"mjml" => :html_body})|)
+
+      assert {~s|"mjml"|, ~s|"mutare"|} in diffs_for(
+               source,
+               [Mutare.Mutators.StringLiteral],
+               :string,
+               @ext
+             )
+    end
+  end
+
   describe "scope" do
     test "a wrong-arity qualified call is left alone" do
       one = "defmodule M do\n  def go(e), do: Phoenix.Swoosh.render_body(e)\nend\n"
@@ -185,7 +258,7 @@ defmodule Mutare.Phoenix.Swoosh.RenderBodyTest do
 
   describe "variant labels (# mutare:ignore[render_body:<kind>])" do
     test "the declared vocabulary" do
-      assert RenderBody.variants() == ["remove", "html_only", "text_only"]
+      assert RenderBody.variants() == ["remove", "html_only", "text_only", "format"]
     end
 
     test "a qualified directive suppresses one kind and leaves the others live" do
@@ -216,6 +289,12 @@ defmodule Mutare.Phoenix.Swoosh.RenderBodyTest do
       def digest(email), do: render_body(email, "digest.html")
 
       def qualified(email, a), do: Phoenix.Swoosh.render_body(email, :notice, a)
+
+      def custom(email) do
+        email
+        |> put_new_formats(%{"html" => :html_body, "amp" => :html_body})
+        |> render_body(:welcome)
+      end
     end
     """
 

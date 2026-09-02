@@ -26,7 +26,9 @@ defmodule Mutare.Phoenix.Swoosh.SemanticsTest do
     baseline = mod.welcome(Swoosh.Email.new(), "Ann")
     assert baseline.html_body == "rendered welcome.html"
     assert baseline.text_body == "rendered welcome.text"
-    assert baseline.assigns == %{name: "Ann"}
+    # `:layout` is in the assigns because the real `prepare_assigns/3` puts it there — the
+    # stand-in mirrors that, since it is the seam the `off` mutant writes to.
+    assert baseline.assigns == %{name: "Ann", layout: false}
 
     id = site_id(sites, {~r/render_body/, "Elixir.Function.identity()"})
     removed = with_active_mutant(id, fn -> mod.welcome(Swoosh.Email.new(), "Ann") end)
@@ -60,6 +62,60 @@ defmodule Mutare.Phoenix.Swoosh.SemanticsTest do
     text_only = with_active_mutant(text_id, fn -> mod.welcome(Swoosh.Email.new()) end)
     assert text_only.html_body == nil
     assert text_only.text_body == "rendered welcome.text"
+  end
+
+  test "an active layout-off mutant renders the body outside its use-configured layout" do
+    source = """
+    defmodule OffMailer do
+      use Phoenix.Swoosh, view: Sample.EmailView, layout: {Sample.LayoutView, :email}
+
+      def welcome(email, name) do
+        email
+        |> render_body(:welcome, %{name: name})
+      end
+    end
+    """
+
+    {[mod], sites} = compile_metamutant(source, [Layout], extensions: [Mutare.Phoenix.Swoosh])
+
+    baseline = mod.welcome(Swoosh.Email.new(), "Ann")
+    assert baseline.html_body == "rendered welcome.html in Sample.LayoutView:email.html"
+    assert baseline.text_body == "rendered welcome.text in Sample.LayoutView:email.text"
+
+    id = site_id(sites, {~r/render_body/, ~r/layout: false/})
+    off = with_active_mutant(id, fn -> mod.welcome(Swoosh.Email.new(), "Ann") end)
+
+    # Both parts still render — only the wrapper is gone, which is the whole point: a suite
+    # that asserts body *content* cannot tell the difference.
+    assert off.html_body == "rendered welcome.html"
+    assert off.text_body == "rendered welcome.text"
+  end
+
+  test "an active format-drop mutant stops rendering that body part" do
+    source = """
+    defmodule FormatMailer do
+      use Phoenix.Swoosh, view: Sample.EmailView
+
+      def welcome(email) do
+        email
+        |> put_new_formats(%{"html" => :html_body, "text" => :text_body})
+        |> render_body(:welcome)
+      end
+    end
+    """
+
+    {[mod], sites} =
+      compile_metamutant(source, [RenderBody], extensions: [Mutare.Phoenix.Swoosh])
+
+    baseline = mod.welcome(Swoosh.Email.new())
+    assert baseline.html_body == "rendered welcome.html"
+    assert baseline.text_body == "rendered welcome.text"
+
+    id = site_id(sites, {~r/put_new_formats/, ~r/%\{"html" => :html_body\}/})
+    html_only = with_active_mutant(id, fn -> mod.welcome(Swoosh.Email.new()) end)
+
+    assert html_only.html_body == "rendered welcome.html"
+    assert html_only.text_body == nil
   end
 
   test "an active layout-removal mutant leaves the layout where it was" do

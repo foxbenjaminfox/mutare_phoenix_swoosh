@@ -1,11 +1,12 @@
 defmodule Mutare.Phoenix.Swoosh.LayoutTest do
   @moduledoc """
   `:mail_layout` — removes a layout setter, pipe-aware: non-piped → the email, piped →
-  `Function.identity()`. Two variant-labelled kinds: `put` (`put_layout/2`) and `put_new`
-  (`put_new_layout/2`). The layout argument — tuple interior included — and
-  `put_new_formats/2`'s map are pinned via the registry `:skip` routes. Works without the
-  use-expansion extension: the setters are genuine exports the injected import really brings
-  into scope.
+  `Function.identity()` (`put` / `put_new`), and suppresses the layout at the render site by
+  writing `layout: false` into `render_body`'s assigns (`off`), gated on a layout actually
+  being in effect. The layout argument — tuple interior included — is pinned via the registry
+  `:skip` routes. Setter removal works without the use-expansion extension (the setters are
+  genuine exports the injected import really brings into scope); `off` needs it for everything
+  but an author-written `layout:` assign.
   """
   use ExUnit.Case, async: true
 
@@ -13,10 +14,20 @@ defmodule Mutare.Phoenix.Swoosh.LayoutTest do
 
   alias Mutare.Phoenix.Swoosh.Layout
 
-  defp layout_diffs(source), do: diffs_for(source, [Layout], :mail_layout)
+  @ext [extensions: [Mutare.Phoenix.Swoosh]]
+
+  defp layout_diffs(source, opts \\ []), do: diffs_for(source, [Layout], :mail_layout, opts)
 
   defp mailer(body) do
     "defmodule Sample.UserEmail do\n  use Phoenix.Swoosh, view: Sample.EmailView\n\n#{body}\nend\n"
+  end
+
+  # A mailer whose `use` line configures a layout — the shape that earns the
+  # `Mutare.Phoenix.Swoosh.LayoutConfigured` marker, and so the `off` mutant.
+  defp branded(body) do
+    "defmodule Sample.UserEmail do\n" <>
+      "  use Phoenix.Swoosh, view: Sample.EmailView, layout: {Sample.LayoutView, :email}\n\n" <>
+      "#{body}\nend\n"
   end
 
   describe "removal across written forms" do
@@ -54,6 +65,90 @@ defmodule Mutare.Phoenix.Swoosh.LayoutTest do
     end
   end
 
+  describe "layout suppression at the render site (off)" do
+    test "a literal assigns map gains a layout: false entry" do
+      source = branded("  def go(e, name), do: render_body(e, :welcome, %{name: name})")
+
+      assert layout_diffs(source, @ext) == [
+               {"render_body(e, :welcome, %{name: name})",
+                "render_body(e, :welcome, %{name: name, layout: false})"}
+             ]
+    end
+
+    test "a keyword assigns list gains the same entry" do
+      source = branded(~s|  def go(e, user), do: render_body(e, :welcome, user: user)|)
+
+      assert layout_diffs(source, @ext) == [
+               {"render_body(e, :welcome, user: user)",
+                "render_body(e, :welcome, user: user, layout: false)"}
+             ]
+    end
+
+    # `Call.rebuild` would requalify the bare call at its new arity, and
+    # `Phoenix.Swoosh.render_body/3` is *not* the wrapper the source called — it never sets the
+    # view, so the mutant would crash instead of testing the layout. The argument is appended to
+    # the node as written instead, which this test pins.
+    test "the wrapper's default-assigns form gains an assigns map and stays bare" do
+      source = branded("  def go(e), do: e |> render_body(:welcome)")
+
+      assert layout_diffs(source, @ext) == [
+               {"render_body(:welcome)", "render_body(:welcome, %{layout: false})"}
+             ]
+    end
+
+    test "a computed assigns argument is normalised the way phoenix_swoosh normalises it" do
+      source = branded("  def go(e, template, assigns), do: render_body(e, template, assigns)")
+
+      assert layout_diffs(source, @ext) == [
+               {"render_body(e, template, assigns)",
+                "render_body(e, template, Elixir.Map.put(Elixir.Enum.into(assigns, %{}), :layout, false))"}
+             ]
+    end
+
+    test "an author-written layout assign is turned off with no marker needed" do
+      source = """
+      defmodule M do
+        def go(e), do: Phoenix.Swoosh.render_body(e, :welcome, %{layout: {LayoutV, :promo}})
+      end
+      """
+
+      assert layout_diffs(source) == [
+               {"Phoenix.Swoosh.render_body(e, :welcome, %{layout: {LayoutV, :promo}})",
+                "Phoenix.Swoosh.render_body(e, :welcome, %{layout: false})"}
+             ]
+    end
+
+    test "an already-false layout assign yields nothing (an equivalent mutant)" do
+      source = branded("  def go(e), do: render_body(e, :welcome, %{layout: false})")
+
+      assert layout_diffs(source, @ext) == []
+    end
+
+    test "no layout in effect yields nothing" do
+      source = mailer("  def go(e, name), do: render_body(e, :welcome, %{name: name})")
+
+      assert layout_diffs(source, @ext) == []
+    end
+
+    test "use Phoenix.Swoosh, layout: false counts as no layout" do
+      source = """
+      defmodule Sample.UserEmail do
+        use Phoenix.Swoosh, view: Sample.EmailView, layout: false
+
+        def go(e, name), do: render_body(e, :welcome, %{name: name})
+      end
+      """
+
+      assert layout_diffs(source, @ext) == []
+    end
+
+    test "without the extension a bare render_body site is out of reach" do
+      source = branded("  def go(e, name), do: render_body(e, :welcome, %{name: name})")
+
+      assert layout_diffs(source) == []
+    end
+  end
+
   describe "the structural :skip pin on the layout argument" do
     test "core's value families leave the tuple interior alone when this family is enabled" do
       source = mailer("  def go(e), do: put_layout(e, {LayoutV, \"email.html\"})")
@@ -75,25 +170,6 @@ defmodule Mutare.Phoenix.Swoosh.LayoutTest do
 
       assert diffs_for(source, [Mutare.Mutators.StringLiteral], :string) ==
                [{"\"email.html\"", "\"\""}, {"\"email.html\"", "\"mutare\""}]
-    end
-  end
-
-  describe "put_new_formats/2 is pinned but never mutated" do
-    test "the extension→field map is left whole and produces no removal" do
-      source = mailer("  def go(e), do: put_new_formats(e, %{\"mjml\" => :html_body})")
-      mutators = [Mutare.Mutators.AtomLiteral, Mutare.Mutators.StringLiteral, Layout]
-
-      assert diffs(source, mutators) == []
-    end
-
-    test "control: without this family the map's strings are fair game" do
-      source = mailer("  def go(e), do: put_new_formats(e, %{\"mjml\" => :html_body})")
-
-      assert {"\"mjml\"", "\"mutare\""} in diffs_for(
-               source,
-               [Mutare.Mutators.StringLiteral],
-               :string
-             )
     end
   end
 
@@ -131,7 +207,7 @@ defmodule Mutare.Phoenix.Swoosh.LayoutTest do
 
   describe "variant labels (# mutare:ignore[mail_layout:<kind>])" do
     test "the declared vocabulary" do
-      assert Layout.variants() == ["put", "put_new"]
+      assert Layout.variants() == ["put", "put_new", "off"]
     end
 
     test "a qualified directive suppresses one kind and leaves the other live" do
@@ -163,9 +239,13 @@ defmodule Mutare.Phoenix.Swoosh.LayoutTest do
       end
 
       def bare(email), do: put_new_layout(email, false)
+
+      def computed(email, template, assigns), do: render_body(email, template, assigns)
+
+      def defaulted(email), do: render_body(email, :welcome)
     end
     """
 
-    assert_metamutant_compiles(source, [Layout])
+    assert_metamutant_compiles(source, [Layout], @ext)
   end
 end

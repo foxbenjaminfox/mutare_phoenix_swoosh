@@ -12,11 +12,12 @@
 #     `render_body`.
 #
 # Fidelity is maintained by hand against phoenix_swoosh 1.2.1 (`lib/phoenix_swoosh.ex`) — the
-# guards, clause structure, and private-map keys mirror the real module. Two deliberate
-# simplifications, each marked below: `do_render_body/4` stamps a recognisable string instead
-# of rendering through `Phoenix.View.render_to_string/3`, and it skips the real
-# `prepare_assigns` layout threading (the tests observe the stored layout via `layout/1`, not
-# a rendered wrapper).
+# guards, clause structure, and private-map keys mirror the real module. One deliberate
+# simplification, marked below: `do_render_body/4` stamps a recognisable string naming the
+# template and the effective layout instead of rendering through
+# `Phoenix.View.render_to_string/3`. The layout threading itself (`prepare_assigns/3` and the
+# assigns override it reads) is mirrored faithfully, because the `:mail_layout` family mutates
+# exactly that seam.
 defmodule Swoosh.Email do
   @moduledoc false
 
@@ -121,17 +122,52 @@ defmodule Phoenix.Swoosh do
     end
   end
 
-  # Simplified from the real `do_render_body/4`: the view check and extension→body-key routing
-  # are kept, but the content is a recognisable stamp instead of a
-  # `Phoenix.View.render_to_string/3` call, and `prepare_assigns`'s layout threading is elided.
+  # Simplified from the real `do_render_body/4`: the view check, `prepare_assigns/3`'s layout
+  # threading, and the extension→body-key routing are kept, but the content is a recognisable
+  # stamp instead of a `Phoenix.View.render_to_string/3` call. The stamp names the layout the
+  # real render would have wrapped that body part in, which is what makes the layout seam
+  # observable in the live-mutant tests.
   defp do_render_body(email, template, extension, assigns) do
     assigns = Enum.into(assigns, %{})
-    email = update_in(email.assigns, &Map.merge(&1, assigns))
+
+    email =
+      email
+      |> put_private(:phoenix_template, template)
+      |> prepare_assigns(assigns, extension)
 
     Map.get(email.private, :phoenix_view) ||
       raise "a view module was not specified, set one with put_view/2"
 
-    Map.put(email, extension_to_body_key(email, extension), "rendered " <> template)
+    Map.put(email, extension_to_body_key(email, extension), stamp(template, email.assigns.layout))
+  end
+
+  defp stamp(template, false), do: "rendered " <> template
+  defp stamp(template, {mod, layout}), do: "rendered #{template} in #{inspect(mod)}:#{layout}"
+
+  # Mirrors the real `prepare_assigns/3`: the per-format layout name is resolved (an atom layout
+  # picks up the extension, exactly as an atom template does), and the result is merged into
+  # `email.assigns` under `:layout` — the assign `Phoenix.View` renders the body inside.
+  defp prepare_assigns(email, assigns, extension) do
+    layout =
+      case layout(email, assigns, extension) do
+        {mod, layout} -> {mod, template_name(layout, extension)}
+        false -> false
+      end
+
+    update_in(email.assigns, &(&1 |> Map.merge(assigns) |> Map.put(:layout, layout)))
+  end
+
+  # The render-call assigns win over the email's stored layout — phoenix_swoosh's per-render
+  # override, and the seam `Mutare.Phoenix.Swoosh.Layout`'s `off` mutant writes to.
+  defp layout(email, assigns, extension) do
+    if extension in extensions(email) do
+      case Map.fetch(assigns, :layout) do
+        {:ok, layout} -> layout
+        :error -> layout(email)
+      end
+    else
+      false
+    end
   end
 
   def put_layout(email, layout), do: do_put_layout(email, layout)

@@ -10,10 +10,13 @@ defmodule Mutare.Phoenix.Swoosh do
   ## Families
 
     * `Mutare.Phoenix.Swoosh.RenderBody` — `:render_body`: remove a `render_body/2,3` call
-      (the email ships with no rendered body), or narrow an atom template to one of its two
-      string forms (only the `.html` / only the `.text` body renders).
+      (the email ships with no rendered body), narrow an atom template to one of its two string
+      forms (only the `.html` / only the `.text` body renders), or drop one entry from a
+      literal `put_new_formats/2` map (that extension stops rendering).
     * `Mutare.Phoenix.Swoosh.Layout` — `:mail_layout`: remove a `put_layout/2` /
-      `put_new_layout/2` call (the body renders in the previous/no layout).
+      `put_new_layout/2` call (the body renders in the previous/no layout), or suppress the
+      layout at the render site by setting the `layout:` assign to `false` (the body renders
+      bare wherever the layout was configured).
 
   Both families also pin phoenix_swoosh's structural argument positions — the template name,
   the layout tuple, the `put_new_formats/2` map — so core's value families never mint the
@@ -56,15 +59,23 @@ defmodule Mutare.Phoenix.Swoosh do
   `use Phoenix.View` in the caller) it additionally surfaces the `import Phoenix.View` that
   nested `use` would inject.
 
+  It also reads one *fact* out of the `use` line: whether the mailer configured a layout
+  (`layout: {MyApp.LayoutView, :email}`). That option is compile-time configuration no mutant
+  can be delivered into, but whether a layout is in effect decides whether suppressing one at
+  the render site is a real mutant or an equivalent one — so the expansion reports it to
+  `Mutare.Phoenix.Swoosh.Layout` as the `Mutare.Phoenix.Swoosh.LayoutConfigured` marker, the
+  one channel a `use` expansion has into a mutator's context.
+
   Without the `:extensions` entry the families still work on qualified and aliased calls, and
-  `:mail_layout` works on bare calls too (`put_layout`/`put_new_layout` really are imported) —
-  but bare `render_body` sites are neither mutated nor pinned.
+  `:mail_layout` works on bare setter calls too (`put_layout`/`put_new_layout` really are
+  imported) — but bare `render_body` sites are neither mutated nor pinned, and `:mail_layout`'s
+  `off` mutant fires only where the author wrote the `layout:` assign themselves.
   """
 
   @behaviour Mutare.UseExpansion
 
   alias Mutare.AST
-  alias Mutare.Phoenix.Swoosh.{Layout, RenderBody}
+  alias Mutare.Phoenix.Swoosh.{Layout, LayoutConfigured, RenderBody}
 
   @doc """
   This package's two phoenix_swoosh mutator families — `RenderBody`, `Layout`.
@@ -88,7 +99,7 @@ defmodule Mutare.Phoenix.Swoosh do
   # registry — the two halves are a matched pair.
   @impl Mutare.UseExpansion
   def expand_use(Phoenix.Swoosh, args, _context),
-    do: Mutare.UseExpansion.expand(directives(args))
+    do: Mutare.UseExpansion.expand(directives(args), markers(args))
 
   def expand_use(_used_module, _args, _context), do: :decline
 
@@ -108,4 +119,19 @@ defmodule Mutare.Phoenix.Swoosh do
     do: not is_nil(AST.opts_get(opts, :template_root))
 
   defp template_root?(_args), do: false
+
+  # The `layout:` option's *presence*, carried to `Mutare.Phoenix.Swoosh.Layout` as a marker
+  # "behaviour" (see `Mutare.Phoenix.Swoosh.LayoutConfigured`). A computed value — a module
+  # attribute, a function call — counts as configured: it is a layout the author put there.
+  # Only a literal `layout: false`, phoenix_swoosh's own default, counts as none.
+  defp markers(args), do: if(layout_configured?(args), do: [LayoutConfigured], else: [])
+
+  defp layout_configured?([opts]) when is_list(opts) do
+    case AST.opts_get(opts, :layout) do
+      nil -> false
+      node -> AST.literal_value(node) != {:ok, false}
+    end
+  end
+
+  defp layout_configured?(_args), do: false
 end
