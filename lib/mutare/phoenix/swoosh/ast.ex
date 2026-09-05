@@ -6,7 +6,7 @@ defmodule Mutare.Phoenix.Swoosh.AST do
   # replacement, and the rebuild compactor. Every fact both families need lives here once.
 
   alias Mutare.AST
-  alias Mutare.MacroRouting.Call
+  alias Mutare.CallRouting.Call
   alias Mutare.Mutator
 
   @typedoc """

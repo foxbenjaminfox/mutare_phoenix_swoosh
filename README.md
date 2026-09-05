@@ -190,27 +190,21 @@ The assigns argument stays ordinary runtime data, so core's value families
 mutate the values inside it — that is the point: a wrong interpolated value in
 a body is caught only by a body-content assertion. One of core's mutants there
 is a crash-kill rather than a signal, though: collapsing the whole assigns map
-to `%{}` kills itself on the first `@assign` the template reads. Pin that one
-position per-project if the noise bothers you, using core's documented
-"reconfigure a built-in" idiom (exclude the stock family, add it back
-configured — listing it *alongside* `:builtins` would run two copies and
-double every map mutant in the project):
+to `%{}` kills itself on the first `@assign` the template reads. Route that
+one position `:interior` per-project if the noise bothers you — the map's own
+node is never offered, while everything inside it still mutates:
 
 ```elixir
 # .mutare.exs
 [
-  mutators:
-    [{:builtins, except: [:map]}] ++
-      [{Mutare.Mutators.MapLiteral,
-        skip_arguments: [{Phoenix.Swoosh, :render_body, 3, [2]}]}] ++
-      Mutare.Swoosh.all(mailer: MyApp.Mailer) ++
-      Mutare.Phoenix.Swoosh.all(),
-  extensions: [Mutare.Phoenix.Swoosh]
+  mutators: [:builtins] ++ Mutare.Swoosh.all(mailer: MyApp.Mailer) ++ Mutare.Phoenix.Swoosh.all(),
+  extensions: [Mutare.Phoenix.Swoosh],
+  call_routes: [{Phoenix.Swoosh, :render_body, 3, [:expression, :expression, :interior]}]
 ]
 ```
 
 That covers the assigns map *itself*. It does not reach values nested inside
-it — an argument mark pins the argument's own node, so core's alias and atom
+it — `:interior` spares only the argument's own node, so core's alias and atom
 families still perturb a `layout: {LayoutView, :email}` assign into
 missing-template crash-kills. The package pins the layout only where it is a
 whole argument (`put_layout/2`, `put_new_layout/2`); inside the assigns map the

@@ -75,18 +75,17 @@ defmodule Mutare.Phoenix.Swoosh.Layout do
   layout view is set, or `false` — is structural configuration, not a computed value: a
   perturbed template name inside the tuple is a missing-template crash at render (an
   uninformative kill), and a flipped `false` is a `put_layout`-contract raise. Both setters'
-  argument 1 is registered `:skip` in the macro-routing registry, which covers the position's
+  argument 1 is routed `:raw` in the call-routing registry, which covers the position's
   **whole subtree** (the string inside the tuple included) against every family — the reason a
-  registry route is used here rather than an argument mark, which pins only the argument's own
-  node.
+  route is used here rather than an argument mark, which pins only the argument's own node.
 
   The same value written as a `layout:` *assign* is **not** pinned: it sits inside the assigns
   map, which stays ordinary runtime data so core's value families can keep mutating the
   template variables around it. Core will therefore perturb an assigns layout tuple into
-  missing-template crash-kills, as it would anywhere. A `:skip_arguments` mark cannot fix that
-  — it pins the argument's own node, not the subtree under it — and routing the whole assigns
-  argument `:skip` would cost every useful mutation inside it. Named rather than hidden: at
-  such a site, `# mutare:ignore` is the tool.
+  missing-template crash-kills, as it would anywhere. Routing the whole assigns argument `:raw`
+  would cost every useful mutation inside it, and `:interior` (which spares only the map's own
+  collapse) does not reach a tuple nested in it. Named rather than hidden: at such a site,
+  `# mutare:ignore` is the tool.
 
   ## Deliberately left alone
 
@@ -110,11 +109,11 @@ defmodule Mutare.Phoenix.Swoosh.Layout do
   """
 
   @behaviour Mutare.Mutator
-  @behaviour Mutare.MacroRouting
+  @behaviour Mutare.CallRouting
 
   alias Mutare.AST
   alias Mutare.Calls
-  alias Mutare.MacroRouting.Call
+  alias Mutare.CallRouting.Call
   alias Mutare.Mutator
   alias Mutare.Mutator.Mutation
   alias Mutare.Phoenix.Swoosh.AST, as: PSAST
@@ -131,12 +130,12 @@ defmodule Mutare.Phoenix.Swoosh.Layout do
   @spec variants() :: [String.t()]
   def variants, do: ~w(put put_new off)
 
-  # Argument 1 of each setter is `:skip` — the structural pin over the whole layout subtree —
+  # Argument 1 of each setter is `:raw` — the structural pin over the whole layout subtree —
   # and the `render_body` routes are declared identically to `:render_body`'s so this family
   # resolves and mutates the render site on its own (see the moduledoc).
-  @impl Mutare.MacroRouting
-  @spec macro_routes() :: [Mutare.MacroRouting.route()]
-  def macro_routes, do: Routes.layout_setters() ++ Routes.render_body()
+  @impl Mutare.CallRouting
+  @spec call_routes() :: [Mutare.CallRouting.route()]
+  def call_routes, do: Routes.layout_setters() ++ Routes.render_body()
 
   # Never fires node-locally: whether removal returns the first arg (non-piped) or
   # `Function.identity()` (piped) depends on pipe context, and `off` depends on the enclosing
@@ -145,13 +144,13 @@ defmodule Mutare.Phoenix.Swoosh.Layout do
   @spec mutate(Macro.t()) :: :skip
   def mutate(_node), do: :skip
 
-  # `Calls.resolved_macro_call/1` normalizes every written form (bare, qualified, aliased,
+  # `Calls.resolved_routed_call/1` normalizes every written form (bare, qualified, aliased,
   # piped) and carries the pipe context itself; the registered arities are matched in the head,
   # so a wrong-arity qualified call — unregistered, hence unstamped — falls to `:skip`.
   @impl Mutare.Mutator
   @spec mutate(Macro.t(), Mutator.context()) :: :skip | [Mutation.t()]
   def mutate(node, context) do
-    case Calls.resolved_macro_call(node) do
+    case Calls.resolved_routed_call(node) do
       %Call{module: Phoenix.Swoosh, name: name, effective_arity: 2} = call
       when name in [:put_layout, :put_new_layout] ->
         [removal(call, label(name))]

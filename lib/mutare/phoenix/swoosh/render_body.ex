@@ -64,7 +64,7 @@ defmodule Mutare.Phoenix.Swoosh.RenderBody do
   uninformative crash-kill), never a signal. `put_new_formats/2`'s extension→field map is the
   same kind of value — a perturbed extension key is a missing template, a perturbed field value
   is a crash-free but meaningless field swap. This family registers all three calls in the
-  macro-routing registry with those positions `:skip`, so **no** family — core value literals
+  call-routing registry with those positions `:raw`, so **no** family — core value literals
   included — mutates them or anything inside them, at bare, qualified, and aliased call sites
   alike. The registry route (rather than an argument mark) is deliberate: it covers the
   position's whole subtree, and registration is also what makes the bare forms resolvable and
@@ -109,11 +109,11 @@ defmodule Mutare.Phoenix.Swoosh.RenderBody do
   """
 
   @behaviour Mutare.Mutator
-  @behaviour Mutare.MacroRouting
+  @behaviour Mutare.CallRouting
 
   alias Mutare.AST
   alias Mutare.Calls
-  alias Mutare.MacroRouting.Call
+  alias Mutare.CallRouting.Call
   alias Mutare.Mutator
   alias Mutare.Mutator.Mutation
   alias Mutare.Phoenix.Swoosh.AST, as: PSAST
@@ -129,12 +129,12 @@ defmodule Mutare.Phoenix.Swoosh.RenderBody do
   @spec variants() :: [String.t()]
   def variants, do: ~w(remove html_only text_only format)
 
-  # Both real `render_body` arities with the template (effective argument 1) `:skip`, plus
-  # `put_new_formats/2` with its map `:skip` — the structural pins. Registration is also what
+  # Both real `render_body` arities with the template (effective argument 1) `:raw`, plus
+  # `put_new_formats/2` with its map `:raw` — the structural pins. Registration is also what
   # resolves the bare `/2` wrapper form and drops the bare-import witness (see the moduledoc).
-  @impl Mutare.MacroRouting
-  @spec macro_routes() :: [Mutare.MacroRouting.route()]
-  def macro_routes, do: Routes.render_body() ++ Routes.formats()
+  @impl Mutare.CallRouting
+  @spec call_routes() :: [Mutare.CallRouting.route()]
+  def call_routes, do: Routes.render_body() ++ Routes.formats()
 
   # Never fires node-locally: whether removal returns the first arg (non-piped) or
   # `Function.identity()` (piped) depends on pipe context, unknowable from the node.
@@ -142,13 +142,13 @@ defmodule Mutare.Phoenix.Swoosh.RenderBody do
   @spec mutate(Macro.t()) :: :skip
   def mutate(_node), do: :skip
 
-  # `Calls.resolved_macro_call/1` is the one reader that normalizes every written form this
+  # `Calls.resolved_routed_call/1` is the one reader that normalizes every written form this
   # family matches — bare (registry-resolved), qualified, aliased, and piped — and carries the
   # pipe context itself, so the threaded `context` is not consulted.
   @impl Mutare.Mutator
   @spec mutate(Macro.t(), Mutator.context()) :: :skip | [Mutation.t()]
   def mutate(node, _context) do
-    case Calls.resolved_macro_call(node) do
+    case Calls.resolved_routed_call(node) do
       %Call{module: Phoenix.Swoosh, name: :render_body, effective_arity: arity} = call
       when arity in [2, 3] ->
         [removal(call) | narrowings(call)]

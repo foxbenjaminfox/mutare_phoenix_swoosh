@@ -9,22 +9,22 @@ defmodule Mutare.Phoenix.Swoosh.Routes do
   # several code providers coalesce in the registry; conflicting ones raise, which is exactly
   # why there is only one copy of each.
 
-  @spec render_body() :: [Mutare.MacroRouting.route()]
+  @spec render_body() :: [Mutare.CallRouting.route()]
   def render_body do
     [
-      {Phoenix.Swoosh, :render_body, 2, [:expression, :skip]},
-      {Phoenix.Swoosh, :render_body, 3, [:expression, :skip, :expression]}
+      {Phoenix.Swoosh, :render_body, 2, [:expression, :raw]},
+      {Phoenix.Swoosh, :render_body, 3, [:expression, :raw, :expression]}
     ]
   end
 
-  @spec layout_setters() :: [Mutare.MacroRouting.route()]
+  @spec layout_setters() :: [Mutare.CallRouting.route()]
   def layout_setters do
     [
-      {Phoenix.Swoosh, :put_layout, 2, [:expression, :skip]},
-      {Phoenix.Swoosh, :put_new_layout, 2, [:expression, :skip]}
+      {Phoenix.Swoosh, :put_layout, 2, [:expression, :raw]},
+      {Phoenix.Swoosh, :put_new_layout, 2, [:expression, :raw]}
     ]
   end
 
-  @spec formats() :: [Mutare.MacroRouting.route()]
-  def formats, do: [{Phoenix.Swoosh, :put_new_formats, 2, [:expression, :skip]}]
+  @spec formats() :: [Mutare.CallRouting.route()]
+  def formats, do: [{Phoenix.Swoosh, :put_new_formats, 2, [:expression, :raw]}]
 end

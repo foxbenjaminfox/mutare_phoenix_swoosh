@@ -39,8 +39,8 @@ Initial release.
     phoenix_swoosh normalises it (`Enum.into/2` then `Map.put/3`), and the
     default-assigns `/2` form gains its assigns map without requalifying the
     bare call (which would skip the `use` wrapper's `put_new_view`).
-- Structural pins on phoenix_swoosh's identifier positions, via macro-routing
-  registry `:skip` routes covering the whole argument subtree: the template
+- Structural pins on phoenix_swoosh's identifier positions, via call-routing
+  registry `:raw` routes covering the whole argument subtree: the template
   name, the layout value (tuple interior included), and `put_new_formats/2`'s
   extension→field map — a perturbed value there is a missing-template crash
   at render, so core's value families never mint mutants in those positions.
