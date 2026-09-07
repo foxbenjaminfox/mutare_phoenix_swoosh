@@ -95,7 +95,7 @@ defmodule Mutare.Phoenix.Swoosh do
   # `render_body/3` itself — the one name the local wrapper provides — so every other bare
   # call resolves exactly as it really does. The witness a fictional bare import would
   # normally splice (an `import` that conflicts with the real local `def` and fails the
-  # compile) is dropped because `RenderBody` registers `render_body` in the macro-routing
+  # compile) is dropped because `RenderBody` registers `render_body` in the call-routing
   # registry — the two halves are a matched pair.
   @impl Mutare.UseExpansion
   def expand_use(Phoenix.Swoosh, args, _context),

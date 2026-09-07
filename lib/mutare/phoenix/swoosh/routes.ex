@@ -1,7 +1,7 @@
 defmodule Mutare.Phoenix.Swoosh.Routes do
   @moduledoc false
 
-  # The macro-routing declarations both families build on, in one place.
+  # The call-routing declarations both families build on, in one place.
   #
   # `render_body/0` is declared by *both* families — `:render_body` mutates the call, and
   # `:mail_layout` reaches the layout through its assigns argument — so the route facts live

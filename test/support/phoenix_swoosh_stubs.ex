@@ -65,7 +65,7 @@ defmodule Phoenix.Swoosh do
   # The exported arities are load-bearing: `render_body/3` is the ONLY `render_body` export —
   # the real module-level function takes no defaults, and the `/2` form exists only as the
   # `use`-injected local wrapper below. Do not "fix" this stub by adding a `/2` export: the
-  # arity-2 tests specifically exercise the macro-registry fallback that production resolution
+  # arity-2 tests specifically exercise the call-routing registry fallback that production resolution
   # relies on for the wrapper form.
 
   import Swoosh.Email
