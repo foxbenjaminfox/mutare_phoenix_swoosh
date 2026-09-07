@@ -212,9 +212,7 @@ honest tools are `# mutare:ignore` at the site, or leaving it be.
 
 ## Development
 
-The plugin is developed against sibling checkouts of Mutare and the base
-package (`{:mutare, path: "../mutare"}`,
-`{:mutare_swoosh, path: "../mutare_swoosh"}`). The test suite runs against
+The test suite runs against
 stand-in `Phoenix.Swoosh`/`Swoosh.Email` modules
 (`test/support/phoenix_swoosh_stubs.ex`) that mirror the real API — the
 `__using__` with its `except:` import and local wrapper included — kept

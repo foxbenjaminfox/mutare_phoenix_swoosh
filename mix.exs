@@ -28,15 +28,11 @@ defmodule Mutare.Phoenix.Swoosh.MixProject do
   defp elixirc_paths(_), do: ["lib"]
 
   defp description do
-    "Custom Mutare mutators for the phoenix_swoosh template-rendering surface — " <>
-      "render_body removal, template and format narrowing, and the mailer layout seam."
+    "Mutare mutators for Phoenix.Swoosh"
   end
 
-  # Hex package metadata. The `mutare_swoosh` base package (and through it the
-  # `mutare` core) is still a `path:` dependency, so an actual `mix hex.publish`
-  # stays blocked until both ship to Hex — this section keeps the manifest ready
-  # for that day. Only runtime and doc artifacts ship — never the test suite or
-  # fixtures.
+  # Hex package metadata. Only runtime and doc artifacts ship — never the test
+  # suite or fixtures.
   defp package do
     [
       licenses: ["MIT"],
@@ -55,8 +51,8 @@ defmodule Mutare.Phoenix.Swoosh.MixProject do
       # The companion base package — this one **builds on** it: it depends on it and
       # composes its preset (`Mutare.Swoosh.all/1`) with the template-rendering families
       # on top (mirroring how `phoenix_swoosh` depends on `swoosh`). `mutare` itself
-      # arrives transitively through it. Path deps for local development until both are
-      # published; a consuming project lists both as `:dev`/`:test` deps.
+      # is also declared directly, since this package calls core's API itself; a
+      # consuming project lists both as `:dev`/`:test` deps.
       #
       # `phoenix_swoosh` itself is deliberately NOT a dependency, not even in :test:
       # the mutators match calls syntactically, and the test suite's stand-ins
@@ -64,8 +60,8 @@ defmodule Mutare.Phoenix.Swoosh.MixProject do
       # `Swoosh.Email` module names so bare-import resolution reflects on real exports —
       # a real :phoenix_swoosh test dep would collide with them. Stub fidelity is
       # maintained against phoenix_swoosh's source by hand (see the stubs' comments).
-      {:mutare, path: "../mutare"},
-      {:mutare_swoosh, path: "../mutare_swoosh"},
+      {:mutare, "~> 0.1"},
+      {:mutare_swoosh, "~> 0.1"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}

@@ -5,7 +5,9 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 0.1.0 - Unreleased
+## [Unreleased]
+
+## [0.1.0] - 2026-09-07
 
 Initial release.
 
@@ -70,3 +72,6 @@ Initial release.
   `put_new_layout` ↔ `put_layout` swap are written down as deferrals with
   their reasons; and the README carries a verified recipe for pinning core's
   whole-assigns-map collapse per project.
+
+[Unreleased]: https://github.com/foxbenjaminfox/mutare_phoenix_swoosh/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/foxbenjaminfox/mutare_phoenix_swoosh/releases/tag/v0.1.0
