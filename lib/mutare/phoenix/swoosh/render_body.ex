@@ -1,9 +1,9 @@
 defmodule Mutare.Phoenix.Swoosh.RenderBody do
   @moduledoc """
-  `:render_body` — mutates the calls that decide **which body parts an email renders**:
+  `:render_body` — mutates calls that control **which email body parts are rendered**:
   `Phoenix.Swoosh.render_body/2,3`, the call that renders an email's templates onto its
   `html_body`/`text_body` fields, and the format map of `Phoenix.Swoosh.put_new_formats/2`,
-  which decides what "both parts" even means. Three kinds, variant-labelled:
+  which maps template extensions to body fields. Three kinds, variant-labelled:
 
   **Removal** (label `remove`) — the call collapses to the email it received, so the email is
   built, addressed, and delivered with no rendered body at all:
@@ -21,10 +21,10 @@ defmodule Mutare.Phoenix.Swoosh.RenderBody do
       render_body(email, :welcome, assigns)  ->  render_body(email, "welcome.html", assigns)
                                              ->  render_body(email, "welcome.text", assigns)
 
-  A survivor means no test asserts the *other* body part — the classic "the text part broke and
-  nobody noticed" gap. `Swoosh.TestAssertions.assert_email_sent/1` on both bodies, or a direct
-  `email.text_body =~ ...`, kills it. Narrowing fires only on a literal atom template; a string
-  or computed template gets the removal mutant alone.
+  A survivor means no test asserts the *other* body part. Use
+  `Swoosh.TestAssertions.assert_email_sent/1` on both bodies, or a direct assertion such as
+  `email.text_body =~ ...`, to kill it. Narrowing applies only to a literal atom template;
+  a string or computed template gets the removal mutant alone.
 
   **Format dropping** (label `format`) — a literal `put_new_formats/2` map with more than one
   entry loses one entry per mutant, so that extension's template stops rendering:
@@ -35,16 +35,16 @@ defmodule Mutare.Phoenix.Swoosh.RenderBody do
 
   This is the custom-formats form of the same gap the narrowings probe — and the *only* form of
   it once a mailer configures `:formats`, since the narrowings' `.html`/`.text` extensions may
-  not exist there (a narrowed mutant then dies as a missing-template crash: an uninformative
+  not exist there (a narrowed mutant then causes a missing-template crash: an uninformative
   kill, never a wrong survivor). A single-entry map produces nothing: dropping the only format
-  renders no body at all, which is the `remove` mutant's diff, and no mutant has two homes.
+  renders no body at all, duplicating the `remove` mutation.
 
   Suppress one kind with `# mutare:ignore[render_body:remove]` / `[render_body:html_only]` /
   `[render_body:text_only]` / `[render_body:format]`, or the family with
   `# mutare:ignore[render_body]`.
 
-  Only the real effective arities fire — `render_body/2,3` (`/2` is the `use`-injected
-  wrapper's default-assigns form) and `put_new_formats/2` — so a name-matched call of any other
+  Mutations apply only to the supported effective arities — `render_body/2,3` (`/2` is the
+  `use`-injected wrapper's default-assigns form) and `put_new_formats/2` — so a name-matched call of any other
   arity is left alone, keeping every metamutant compiling. Piped calls are removed with the
   `Elixir.Function.identity()` no-op stage (the `:Elixir`-led alias is never rewritten by alias
   resolution, so the no-op always names the real `Function.identity/1`).
@@ -68,41 +68,40 @@ defmodule Mutare.Phoenix.Swoosh.RenderBody do
   included — mutates them or anything inside them, at bare, qualified, and aliased call sites
   alike. The registry route (rather than an argument mark) is deliberate: it covers the
   position's whole subtree, and registration is also what makes the bare forms resolvable and
-  witness-safe at all (see below). Keeping a position raw for everyone and then minting the one
-  safe mutation there *from its owner* is exactly what the routing contract is for.
+  witness-safe at all (see below). The `:raw` route excludes the argument subtree from
+  mutation, while this family can still rewrite the argument as part of a call-level mutation.
 
   ## Resolution: why this family is half of a matched pair
 
   `use Phoenix.Swoosh` injects `import Phoenix.Swoosh, except: [render_body: 3]` plus a local
   `def render_body/2,3` wrapper — so a mailer's bare `render_body` calls resolve to a local
-  definition invisible to Mutare. `Mutare.Phoenix.Swoosh` (listed under `:extensions`)
-  overrides that `use` to surface a whole `import Phoenix.Swoosh` in its place; this family's
-  registry entries then complete the picture twice over:
+  definition that Mutare does not resolve. `Mutare.Phoenix.Swoosh` (listed under `:extensions`)
+  overrides that `use` expansion to return a whole `import Phoenix.Swoosh` in its place.
+  This family's registry entries serve two purposes:
 
     * the `/2` wrapper arity is not a real `Phoenix.Swoosh` export, so import reflection can
       never resolve a bare `render_body(email, :welcome)` — the registry's whole-import
       fallback is what resolves it;
     * a bare imported call normally carries a compile-time **witness** that re-imports the
-      believed provider next to the mutant — which, next to the real injected local `def`,
+      resolved provider next to the mutant — which, next to the real injected local `def`,
       is an import/local conflict that would fail the single metamutant compile. Registered
       calls have that witness dropped.
 
   Without the extension, bare `render_body` sites are neither mutated nor pinned (the
-  faithfully-harvested `except:` import excludes exactly this one name); qualified and aliased
+  injected `except:` import excludes exactly this one name); qualified and aliased
   sites work regardless.
 
   ## Deliberately left alone
 
     * **The assigns argument** is ordinary runtime data — core's families mutate the *values*
       inside it as they would anywhere (a wrong interpolated value in a body only a
-      body-content assertion catches). Its *keys* are likewise left to core's uniform
-      map-literal judgment, not pinned here. The one assigns entry this package does speak for
-      is `:layout`, which is phoenix_swoosh vocabulary rather than template data —
-      `Mutare.Phoenix.Swoosh.Layout` owns it.
+      body-content assertion catches). Its *keys* are likewise subject to core's map-literal
+      mutation rules, not pinned here. `Mutare.Phoenix.Swoosh.Layout` mutates the `:layout`
+      assign, which configures phoenix_swoosh rather than supplying template data.
     * **Dropping an assigns entry** was considered and rejected: a template referencing the
       dropped assign raises `KeyError`/`ArgumentError` at render — a crash-kill, not a
-      survivor question.
-    * **Swapping a format's body field** (`"html" => :html_body` → `:text_body`) is not minted:
+      test of body-content assertions.
+    * **Swapping a format's body field** (`"html" => :html_body` → `:text_body`) is not generated:
       the rendered html would land in `text_body` alongside whatever the text template put
       there, and which one survives depends on map ordering — a mutant whose behaviour a reader
       cannot predict from its diff.

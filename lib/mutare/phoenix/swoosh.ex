@@ -10,7 +10,7 @@ defmodule Mutare.Phoenix.Swoosh do
   ## Families
 
     * `Mutare.Phoenix.Swoosh.RenderBody` — `:render_body`: remove a `render_body/2,3` call
-      (the email ships with no rendered body), narrow an atom template to one of its two string
+      (the email is sent with no rendered body), narrow an atom template to one of its two string
       forms (only the `.html` / only the `.text` body renders), or drop one entry from a
       literal `put_new_formats/2` map (that extension stops rendering).
     * `Mutare.Phoenix.Swoosh.Layout` — `:mail_layout`: remove a `put_layout/2` /
@@ -19,7 +19,7 @@ defmodule Mutare.Phoenix.Swoosh do
       bare wherever the layout was configured).
 
   Both families also pin phoenix_swoosh's structural argument positions — the template name,
-  the layout tuple, the `put_new_formats/2` map — so core's value families never mint the
+  the layout tuple, the `put_new_formats/2` map — so core's value families do not generate the
   missing-template crash mutants those positions would otherwise get.
 
   ## Usage
@@ -41,27 +41,27 @@ defmodule Mutare.Phoenix.Swoosh do
 
   ## Why the `:extensions` entry
 
-  `use Phoenix.Swoosh` does not surface `render_body` the way most `use`s surface their API.
+  `use Phoenix.Swoosh` defines a local `render_body` wrapper rather than importing it.
   Its `__using__` injects `import Phoenix.Swoosh, except: [render_body: 3]` plus a **local**
   `def render_body(email, template, assigns \\\\ %{})` that wraps the module function — so the
-  bare `render_body` calls a mailer module writes resolve to a hidden local definition, not to
-  an import. Mutare's in-process `use` expansion harvests the injected imports faithfully, and
-  faithfully finds `render_body` excluded from them: the bare calls stay unresolved, and the
-  `:render_body` family only sees qualified/aliased call forms.
+  bare `render_body` calls in a mailer module resolve to a local definition, not to an import.
+  Mutare's in-process `use` expansion collects the injected imports, which exclude
+  `render_body`: the bare calls stay unresolved, and the `:render_body` family only matches
+  qualified/aliased call forms.
 
-  This module is therefore also a `Mutare.UseExpansion` extension. It takes over
-  `use Phoenix.Swoosh` and surfaces `import Swoosh.Email` plus a **whole**
+  This module is therefore also a `Mutare.UseExpansion` extension. It handles expansion of
+  `use Phoenix.Swoosh` and returns `import Swoosh.Email` plus a **whole**
   `import Phoenix.Swoosh` — deliberately without the `except:` — standing in for the injected
   local wrapper, which forwards to `Phoenix.Swoosh.render_body/3` anyway. With it listed under
   `:extensions`, bare `render_body` calls (both arities, the wrapper's default-argument form
   included) resolve, mutate, and get their template position pinned. For the standalone
   template style (`use Phoenix.Swoosh, template_root: ...` — which also does
-  `use Phoenix.View` in the caller) it additionally surfaces the `import Phoenix.View` that
+  `use Phoenix.View` in the caller) it additionally returns the `import Phoenix.View` that
   nested `use` would inject.
 
-  It also reads one *fact* out of the `use` line: whether the mailer configured a layout
+  It also records whether the mailer's `use` line configured a layout
   (`layout: {MyApp.LayoutView, :email}`). That option is compile-time configuration no mutant
-  can be delivered into, but whether a layout is in effect decides whether suppressing one at
+  can be delivered into, but whether a layout is in effect determines whether suppressing one at
   the render site is a real mutant or an equivalent one — so the expansion reports it to
   `Mutare.Phoenix.Swoosh.Layout` as the `Mutare.Phoenix.Swoosh.LayoutConfigured` marker, the
   one channel a `use` expansion has into a mutator's context.
@@ -69,7 +69,7 @@ defmodule Mutare.Phoenix.Swoosh do
   Without the `:extensions` entry the families still work on qualified and aliased calls, and
   `:mail_layout` works on bare setter calls too (`put_layout`/`put_new_layout` really are
   imported) — but bare `render_body` sites are neither mutated nor pinned, and `:mail_layout`'s
-  `off` mutant fires only where the author wrote the `layout:` assign themselves.
+  `off` mutant is generated only where the author wrote the `layout:` assign themselves.
   """
 
   @behaviour Mutare.UseExpansion

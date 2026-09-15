@@ -1,6 +1,6 @@
 defmodule Mutare.Phoenix.Swoosh.Layout do
   @moduledoc """
-  `:mail_layout` — mutates the seam that decides **which layout wraps the rendered body**.
+  `:mail_layout` — mutates calls that configure **which layout wraps the rendered body**.
 
   Two kinds, variant-labelled:
 
@@ -13,7 +13,7 @@ defmodule Mutare.Phoenix.Swoosh.Layout do
 
   `put` (`put_layout/2`) leaves the email with its previous layout, usually the
   `use`-configured one; `put_new` (`put_new_layout/2`) leaves the layout unset and the body
-  renders bare. Either way the templates still render and the email still ships.
+  renders bare. Either way the templates still render and the email is still sent.
 
   **Layout suppression at the render site** (label `off`) — `render_body/2,3` takes the layout
   from its assigns when one is given there (phoenix_swoosh's per-render override), so setting
@@ -31,42 +31,42 @@ defmodule Mutare.Phoenix.Swoosh.Layout do
   `# mutare:ignore[mail_layout:put]` / `[mail_layout:put_new]` / `[mail_layout:off]`, or the
   family with `# mutare:ignore[mail_layout]`.
 
-  ## Why the render site, and when `off` fires
+  ## Why the render site, and when `off` applies
 
   Real mailers rarely call `put_layout` at all: the idiomatic place for a layout is the `use`
   line (`use Phoenix.Swoosh, view: MyApp.EmailView, layout: {MyApp.LayoutView, :email}`), which
-  is compile-time configuration Mutare cannot reach (see the README's "What's deliberately out
-  of scope"). Without the `off` mutant this family would have nothing to say about the majority
-  of layout-using mailers. The assigns override is the runtime seam that same configuration
-  flows through, so mutating it reaches the layout wherever it was configured.
+  is compile-time configuration excluded from mutation (see the README's "What's deliberately
+  out of scope"). The `off` mutant tests layout assertions in mailers that configure their
+  layout this way. Setting the assigns override to `false` disables the layout at runtime,
+  wherever it was configured.
 
-  Suppressing a layout that was never in effect is an equivalent mutant, and this package does
-  not mint those, so `off` fires only when a layout demonstrably *is* in effect at the site:
+  Suppressing a layout that was never in effect is an equivalent mutant, so `off` is generated
+  only when a layout demonstrably *is* in effect at the site:
 
     * the mailer's `use Phoenix.Swoosh` line configured one — reported to this family by
       `Mutare.Phoenix.Swoosh.LayoutConfigured`, the marker the package's `:extensions` entry
       injects while expanding that `use`; or
-    * the call's own assigns literal carries a truthy `layout:` entry, which needs no marker
+    * the call's own assigns literal contains a truthy `layout:` entry, which needs no marker
       because the author wrote the layout right there.
 
-  Without the `:extensions` entry there is no marker, so `off` fires on the second case only.
+  Without the `:extensions` entry there is no marker, so `off` applies to the second case only.
   A mailer that configures its layout by calling `put_layout` gets the `put` removal at that
-  call instead — the same gap, owned once.
+  call instead, testing the same gap without a second mutation at the render call.
 
   ## Written forms and arities
 
-  Only the real arities fire — both setters are `/2`, and `render_body` is `/2,3` (`/2` is the
-  `use`-injected wrapper's default-assigns form) — so a name-matched call of any other arity is
-  left alone, keeping every metamutant compiling. Piped setter calls are removed with the
+  Mutations apply only to the supported arities — both setters are `/2`, and `render_body` is
+  `/2,3` (`/2` is the `use`-injected wrapper's default-assigns form) — so a name-matched call of
+  any other arity is left alone, keeping every metamutant compiling. Piped setter calls are removed with the
   `Elixir.Function.identity()` no-op stage.
 
   Matches direct (`Phoenix.Swoosh.put_layout(...)`), aliased, and bare-imported calls. Unlike
   `:render_body`, the setters' bare form needs no `use`-expansion override: they are genuine
   `Phoenix.Swoosh` exports that the injected `import Phoenix.Swoosh, except: [render_body: 3]`
-  really does bring into scope, so Mutare's in-process `use` expansion resolves them on its
-  own. Bare `render_body` calls do need it, which is why this family declares the same
-  `render_body` routes `:render_body` does — from one internal routes helper, so the fact has a
-  single home. Identical declarations from two providers coalesce in the registry, so either
+  brings into scope, so Mutare's in-process `use` expansion resolves them without an override.
+  Bare `render_body` calls do need it, which is why this family declares the same
+  `render_body` routes as `:render_body`, using a shared internal routes helper.
+  Identical declarations from two providers coalesce in the registry, so either
   family alone still resolves and pins the call.
 
   ## The layout argument is pinned
@@ -83,9 +83,9 @@ defmodule Mutare.Phoenix.Swoosh.Layout do
   map, which stays ordinary runtime data so core's value families can keep mutating the
   template variables around it. Core will therefore perturb an assigns layout tuple into
   missing-template crash-kills, as it would anywhere. Routing the whole assigns argument `:raw`
-  would cost every useful mutation inside it, and `:interior` (which spares only the map's own
-  collapse) does not reach a tuple nested in it. Named rather than hidden: at such a site,
-  `# mutare:ignore` is the tool.
+  would exclude every useful mutation inside it, and `:interior` (which excludes only the map's
+  own node from mutation) does not exclude a tuple nested in it. Use `# mutare:ignore` at
+  the site to suppress these mutations.
 
   ## Deliberately left alone
 
@@ -98,14 +98,13 @@ defmodule Mutare.Phoenix.Swoosh.Layout do
       both body parts render inside the *html* layout) is the exact analogue of `:render_body`'s
       template narrowing and probes a real gap — no test asserts the text part's wrapper. It is
       deferred rather than rejected: whether an html layout renders around a text body cleanly
-      or raises inside `Phoenix.View` is a fact about the real library this package does not
-      yet verify, and a mutant whose kill mode is unknown is not worth minting. The sites are
-      also vanishingly rare (see "Why the render site" above).
+      or raises inside `Phoenix.View` has not yet been verified against the real library.
+      The sites are also vanishingly rare (see "Why the render site" above).
     * **Swapping `put_new_layout` for `put_layout`** (and the same for the view setters) is the
       phoenix_swoosh analogue of `Mutare.Mutators.MapKeyword`'s `put ↔ put_new` lattice and
-      would collide with nothing. It is not minted because the only `put_new_layout` call in a
-      typical mailer is the one the `use` wrapper generates — macro-generated code, which
-      Mutare does not mutate.
+      would not overlap with existing mutations. It is not generated because the only
+      `put_new_layout` call in a typical mailer is the one the `use` wrapper generates —
+      macro-generated code, which Mutare does not mutate.
   """
 
   @behaviour Mutare.Mutator

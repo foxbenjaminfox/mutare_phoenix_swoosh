@@ -14,8 +14,8 @@ surface — the layer `Phoenix.Swoosh` adds on top of a
 Template-rendered email has its own signature test gap: the suite asserts the
 email was *sent*, and nothing more. A `render_body` that never ran, a `.text`
 template that broke while the `.html` part kept passing (or the reverse), a
-branded layout that quietly stopped wrapping the body — all pass such a test.
-`mutare_phoenix_swoosh` mints *well-formed-but-wrong* mailer programs at
+branded layout that no longer wraps the body — all pass such a test.
+`mutare_phoenix_swoosh` generates *well-formed-but-wrong* mailer programs at
 exactly those spots, so a **surviving** mutant points at the precise assertion
 your suite is missing.
 
@@ -72,7 +72,7 @@ mix mutare
 
 | Family | Name | Mutation | The gap a survivor exposes |
 | --- | --- | --- | --- |
-| `Mutare.Phoenix.Swoosh.RenderBody` | `:render_body` | removes a `render_body/2,3` call (`remove` — the email ships with no rendered body); narrows a literal atom template to one of its string forms (`html_only` / `text_only` — only that body part renders); drops one entry from a literal `put_new_formats/2` map (`format` — that extension stops rendering) | no test asserts the rendered body — or asserts only *one* of the body parts, the classic "the text part broke and nobody noticed" |
+| `Mutare.Phoenix.Swoosh.RenderBody` | `:render_body` | removes a `render_body/2,3` call (`remove` — the email is sent with no rendered body); narrows a literal atom template to one of its string forms (`html_only` / `text_only` — only that body part renders); drops one entry from a literal `put_new_formats/2` map (`format` — that extension stops rendering) | no test asserts the rendered body, or tests assert only *one* of the body parts |
 | `Mutare.Phoenix.Swoosh.Layout` | `:mail_layout` | removes `put_layout/2` (`put`) / `put_new_layout/2` (`put_new`), collapsing to the email; sets the `layout:` assign of a `render_body` call to `false` (`off` — the body renders with no layout at all) | no test asserts which layout wrapped the rendered body |
 
 Each family matches its call written qualified
@@ -85,32 +85,32 @@ Both families also *pin* phoenix_swoosh's structural argument positions
 against Mutare's built-in value families: the template name, the layout tuple
 (interior included), and the `put_new_formats/2` map. A perturbed template or
 layout is a missing-template crash at render time — an uninformative kill,
-never a test-quality signal — so core's literal families never mint mutants
-there. Keeping a position raw for *everyone* and then minting the one safe
-mutation there from its owner is what the `format` drop does: the map's keys
-stay untouchable, and dropping a whole entry is the one rewrite that means
-something.
+never a test-quality signal — so core's literal families do not generate mutants
+there. The `format` mutation drops a whole map entry while the `:raw` route
+excludes the map's contents from mutation by any family. This tests whether
+the missing body part is asserted without changing template identifiers.
 
-### Why `:mail_layout` reaches into the render call
+### Why `:mail_layout` mutates the render call
 
 Idiomatic mailers rarely call `put_layout` at all — the layout goes on the
 `use` line (`use Phoenix.Swoosh, view: MyApp.EmailView, layout: {MyApp.LayoutView, :email}`),
 which is compile-time configuration no mutant can be delivered into (see
 ["What's deliberately out of scope"](#whats-deliberately-out-of-scope)). The
-`off` mutant reaches the same layout through the seam it actually flows
-through at runtime: `render_body`'s assigns, where phoenix_swoosh looks for a
-per-render override before falling back to the email's layout.
+`off` mutant overrides the same layout at runtime through `render_body`'s
+assigns. phoenix_swoosh uses a per-render override when present and otherwise
+uses the email's layout.
 
 Suppressing a layout that was never in effect would be an equivalent mutant —
-unkillable, and this package does not mint those — so `off` fires only where a
-layout demonstrably *is* in effect:
+unkillable — so `off` is generated only where a layout demonstrably *is* in
+effect:
 
 - the mailer's `use` line configured one (the `:extensions` entry reports that
   to the family; see below), or
-- the call's own assigns literal carries a truthy `layout:` entry.
+- the call's own assigns literal contains a truthy `layout:` entry.
 
 A mailer that configures its layout by *calling* `put_layout` gets the `put`
-removal at that call instead — the same gap, owned once.
+removal at that call instead, testing the same gap without a second mutation
+at the render call.
 
 ## Ignoring one kind of mutant
 
@@ -127,24 +127,22 @@ email |> put_new_formats(@formats)        # mutare:ignore[render_body:format]
 
 ## Why the `:extensions` entry
 
-`use Phoenix.Swoosh` does not surface `render_body` the way most `use`s
-surface their API: its `__using__` injects
+`use Phoenix.Swoosh` defines a local `render_body` wrapper rather than
+importing it: its `__using__` injects
 `import Phoenix.Swoosh, except: [render_body: 3]` plus a **local**
 `def render_body(email, template, assigns \\ %{})` wrapper. The bare
-`render_body` calls a mailer module writes therefore resolve to a hidden local
-definition — invisible to Mutare's (otherwise faithful) in-process `use`
-expansion.
+`render_body` calls in a mailer module therefore resolve to a local
+definition that Mutare's in-process `use` expansion does not resolve.
 
 `Mutare.Phoenix.Swoosh` is therefore also a `Mutare.UseExpansion` extension:
-listed under `:extensions`, it takes over `use Phoenix.Swoosh` and surfaces a
-**whole** `import Phoenix.Swoosh` standing in for the injected wrapper (which
+listed under `:extensions`, it handles expansion of `use Phoenix.Swoosh` and
+returns a **whole** `import Phoenix.Swoosh` standing in for the injected wrapper (which
 forwards to `Phoenix.Swoosh.render_body/3` anyway). With it, bare
 `render_body` calls — both wrapper arities — resolve, mutate, and get their
 template position pinned.
 
-The extension also reads one *fact* out of the `use` line — whether the mailer
-configured a layout — and reports it to `:mail_layout` as the
-`Mutare.Phoenix.Swoosh.LayoutConfigured` marker. Mutare hands a `use`'s
+The extension also records whether the `use` line configured a layout, using
+the `Mutare.Phoenix.Swoosh.LayoutConfigured` marker. Mutare passes a `use`'s
 injected behaviours to mutators as `context.behaviours`; that is the one
 channel a `use` expansion has into a mutator, and it is how a compile-time
 option gates a runtime mutant. The marker never reaches the metamutant, the
@@ -153,8 +151,8 @@ compiled program, or the report.
 Without the `:extensions` entry the families still work on qualified and
 aliased calls, and `:mail_layout` works on bare setter calls too (the layout
 setters really are imported) — but bare `render_body` sites are neither
-mutated nor pinned, and `off` fires only where the author wrote the `layout:`
-assign themselves.
+mutated nor pinned, and `off` is generated only where the author wrote the
+`layout:` assign themselves.
 
 ## What's deliberately out of scope
 
@@ -162,32 +160,31 @@ assign themselves.
   layout: {MyApp.LayoutView, :email}, formats: %{...}` is compile-time
   configuration: Mutare prunes `use` arguments (and module attributes) whole,
   because a runtime selector there is at best inert and at worst illegal — it
-  would sink the single build. Only the runtime calls that same configuration
-  flows through are mutable, which is why `:mail_layout` mutates the render
+  could cause the single metamutant build to fail. Only runtime calls that use
+  that configuration are mutable, which is why `:mail_layout` mutates the render
   call's `layout:` assign and `:render_body` mutates `put_new_formats/2`
   rather than the `use` options behind them.
 - **The base Swoosh surface** — recipients, sender, subject, bodies, headers,
-  attachments, and delivery live in the companion
+  attachments, and delivery are handled by the companion
   [`mutare_swoosh`](https://hexdocs.pm/mutare_swoosh), which this package
   depends on and composes with.
 - **`put_view/2` / `put_new_view/2` removal** — a render with no view module
   raises at `render_body` time: a crash-kill, not a test-quality signal.
 - **Assigns-entry dropping** — a template referencing the dropped assign
   raises at render; core's value families still mutate the assigns *values*
-  as they would anywhere. The one assigns entry this package does speak for is
-  `layout:`, which is phoenix_swoosh vocabulary rather than template data.
+  as they would anywhere. This package mutates the `layout:` assign, which
+  configures phoenix_swoosh rather than supplying template data.
 - **Narrowing a layout name** (`{LayoutView, :email}` → `{LayoutView, "email.html"}`,
   so both parts render inside the *html* layout) — the exact analogue of the
   template narrowing, and a real gap ("no test asserts the text part's
   wrapper"), but whether an html layout renders cleanly around a text body is
-  a fact about the real library this package has not verified. A mutant whose
-  kill mode is unknown is not worth minting; deferred, not rejected.
+  not yet verified against the real library. This mutation is deferred until
+  that behaviour is verified.
 - **Swapping `put_new_layout` for `put_layout`** (and the view setters) — the
   phoenix_swoosh analogue of core's `Mutare.Mutators.MapKeyword` `put ↔ put_new`
   lattice, and it would collide with nothing. Left out because the only
   `put_new_layout` call in a typical mailer is the one the `use` wrapper
-  generates, and Mutare mutates what the author wrote, never what a macro
-  wrote for them.
+  generates, and Mutare mutates author-written code, not macro-generated code.
 
 ## Tuning core's families at the assigns position
 
@@ -195,7 +192,7 @@ The assigns argument stays ordinary runtime data, so core's value families
 mutate the values inside it — that is the point: a wrong interpolated value in
 a body is caught only by a body-content assertion. One of core's mutants there
 is a crash-kill rather than a signal, though: collapsing the whole assigns map
-to `%{}` kills itself on the first `@assign` the template reads. Route that
+to `%{}` causes an error on the first `@assign` the template reads. Route that
 one position `:interior` per-project if the noise bothers you — the map's own
 node is never offered, while everything inside it still mutates:
 
@@ -209,11 +206,11 @@ node is never offered, while everything inside it still mutates:
 ```
 
 That covers the assigns map *itself*. It does not reach values nested inside
-it — `:interior` spares only the argument's own node, so core's alias and atom
+it — `:interior` excludes only the argument's own node, so core's alias and atom
 families still perturb a `layout: {LayoutView, :email}` assign into
 missing-template crash-kills. The package pins the layout only where it is a
-whole argument (`put_layout/2`, `put_new_layout/2`); inside the assigns map the
-honest tools are `# mutare:ignore` at the site, or leaving it be.
+whole argument (`put_layout/2`, `put_new_layout/2`). Use `# mutare:ignore` at
+the site to suppress these mutations inside the assigns map, or leave them enabled.
 
 ## Development
 
