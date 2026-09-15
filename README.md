@@ -1,5 +1,10 @@
 # mutare_phoenix_swoosh
 
+[![Hex.pm](https://img.shields.io/hexpm/v/mutare_phoenix_swoosh.svg)](https://hex.pm/packages/mutare_phoenix_swoosh)
+[![Hexdocs](https://img.shields.io/badge/hexdocs-docs-blue.svg)](https://hexdocs.pm/mutare_phoenix_swoosh)
+[![CI](https://github.com/foxbenjaminfox/mutare_phoenix_swoosh/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/foxbenjaminfox/mutare_phoenix_swoosh/actions/workflows/ci.yml)
+[![License](https://img.shields.io/hexpm/l/mutare_phoenix_swoosh.svg)](https://github.com/foxbenjaminfox/mutare_phoenix_swoosh/blob/master/LICENSE)
+
 Mutation-testing mutators for the
 [phoenix_swoosh](https://hexdocs.pm/phoenix_swoosh) template-rendering
 surface — the layer `Phoenix.Swoosh` adds on top of a
