@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking: Mutare 0.4.0 and mutare_swoosh 0.2 or newer are required**
+  (`{:mutare, "~> 0.4.0"}`, `{:mutare_swoosh, "~> 0.2"}`). Mutare 0.4.0 hands a mutator a
+  pipe stage as the direct call it is sugar for, and the families read the email at
+  argument 0 in both spellings; the `Function.identity()` no-op stage is gone.
+- **A removed pipe stage is diffed as the email it collapses to.** `email |> render_body(:welcome)`
+  → `email`, and `email |> put_layout({LayoutView, :email})` → `email`, where the diff read
+  `render_body(:welcome)` → `Elixir.Function.identity()`. A stage in the middle of a chain
+  takes the chain upstream of it along (`e |> render_body("welcome.html", %{}) |> deliver()`
+  reads `e |> render_body("welcome.html", %{})` → `e`). The narrowing, format-drop and
+  layout-off mutants still read at the stage alone. The mutants themselves, their variant
+  labels and their notes are unchanged.
+
 ## [0.1.0] - 2026-09-07
 
 Initial release.

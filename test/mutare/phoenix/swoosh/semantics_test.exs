@@ -1,8 +1,8 @@
 defmodule Mutare.Phoenix.Swoosh.SemanticsTest do
-  # Selecting a mutant is VM-global (see Mutare.Test), so these live-mutant checks are not
-  # async. The fixtures compile against the test-support `Phoenix.Swoosh` stand-in, whose
-  # `render_body` really routes each extension's render onto `html_body`/`text_body`.
-  use ExUnit.Case, async: false
+  # The fixtures compile against the test-support `Phoenix.Swoosh` stand-in, whose
+  # `render_body` really routes each extension's render onto `html_body`/`text_body`. The
+  # live-mutant helpers select on a key private to this module, so the checks run async.
+  use ExUnit.Case, async: true
 
   import Mutare.Test
 
@@ -30,7 +30,7 @@ defmodule Mutare.Phoenix.Swoosh.SemanticsTest do
     # stand-in mirrors that, since it is the seam the `off` mutant writes to.
     assert baseline.assigns == %{name: "Ann", layout: false}
 
-    id = site_id(sites, {~r/render_body/, "Elixir.Function.identity()"})
+    id = site_id(sites, {~r/render_body/, "email"})
     removed = with_active_mutant(id, fn -> mod.welcome(Swoosh.Email.new(), "Ann") end)
 
     assert removed.html_body == nil

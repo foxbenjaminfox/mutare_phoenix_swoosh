@@ -2,12 +2,11 @@ defmodule Mutare.Phoenix.Swoosh.AST do
   @moduledoc false
 
   # Shared AST helpers for this package's two families, mirroring `Mutare.Swoosh.AST` in the
-  # base package: reading a literal map/keyword container, the pipe-aware "remove this call"
-  # replacement, and the rebuild compactor. Every fact both families need lives here once.
+  # base package: reading a literal map/keyword container, the "remove this call" replacement,
+  # and the rebuild compactor. Every fact both families need lives here once.
 
   alias Mutare.AST
   alias Mutare.CallRouting.Call
-  alias Mutare.Mutator
 
   @typedoc """
   A literal `%{...}` or `[key: value]` argument, read as its entry list plus the function that
@@ -15,12 +14,11 @@ defmodule Mutare.Phoenix.Swoosh.AST do
   """
   @type container :: {:keyword | :map, [Macro.t()], ([Macro.t()] -> Macro.t())}
 
-  # The call's effective argument `index` as `{visible_index, node}` — the visible index is what
-  # `List.replace_at/3` needs, and it shifts under a pipe.
-  @spec effective_arg(Call.t(), non_neg_integer()) :: {non_neg_integer(), Macro.t()} | nil
-  def effective_arg(%Call{arguments: args, pipe_mode: pipe_mode}, effective_index) do
-    index = Mutator.visible_index(effective_index, pipe_mode)
-
+  # The call's argument at `index` as `{index, node}` — the pair `List.replace_at/3` needs. A
+  # piped call arrives as the direct call, its piped value at index 0, so the index is the
+  # same in both spellings.
+  @spec arg_at(Call.t(), non_neg_integer()) :: {non_neg_integer(), Macro.t()} | nil
+  def arg_at(%Call{arguments: args}, index) do
     case Enum.at(args, index) do
       nil -> nil
       node -> {index, node}
@@ -101,23 +99,32 @@ defmodule Mutare.Phoenix.Swoosh.AST do
   @spec false_literal?(Macro.t()) :: boolean()
   def false_literal?(node), do: AST.literal_value(node) == {:ok, false}
 
-  # The pipe-aware "remove this call, keep the email" replacement: a direct call collapses to its
-  # first argument; a piped stage becomes `Elixir.Function.identity()` (absolute, so no alias in
-  # the target source can redirect it).
+  # The "remove this call, keep the email" replacement: the call collapses to its first
+  # argument. A piped stage is the same call with the email at index 0, and core keeps the
+  # written spelling in the report (`email |> render_body(:welcome)` → `email`).
   @spec collapse_to_email(Call.t()) :: Macro.t()
-  def collapse_to_email(%Call{pipe_mode: :piped}),
-    do: AST.absolute_call([:Function], :identity, [])
+  def collapse_to_email(%Call{arguments: [email | _rest]}), do: email
 
-  def collapse_to_email(%Call{pipe_mode: :unpiped, arguments: [email | _rest]}), do: email
-
-  # `Call.rebuild` reuses the visible argument nodes, whose meta still describes the original
+  # `Call.rebuild` reuses the written argument nodes, whose meta still describes the original
   # source layout; mixed with a fresh, position-free node, Sourceror renders the rebuild across
   # several lines. Dropping the position keys from the rebuilt subtree renders the mutant
   # compactly; the value-shaping keys (`:delimiter`, `:format`, `:token`) stay.
+  #
+  # Argument 0 — the email — is left exactly as offered: core reports a whole-call mutant that
+  # kept the offered argument 0 *at the stage* of a written pipe (`e |> render_body(:welcome)`
+  # is diffed as `render_body(:welcome)` → `render_body("welcome.html")`), and it recognises
+  # that argument by identity, meta included. Its own meta never spreads the rendering: it is
+  # the first argument, and a pipe stage does not render it at all.
   @position_keys [:line, :column, :end_of_expression, :newlines, :closing]
 
   @spec compact(Macro.t()) :: Macro.t()
-  def compact(ast) do
+  def compact({form, meta, [email | rest]}) when is_list(meta) do
+    {form, Keyword.drop(meta, @position_keys), [email | Enum.map(rest, &compact_all/1)]}
+  end
+
+  def compact(ast), do: compact_all(ast)
+
+  defp compact_all(ast) do
     Macro.prewalk(ast, fn
       {form, meta, args} when is_list(meta) -> {form, Keyword.drop(meta, @position_keys), args}
       other -> other

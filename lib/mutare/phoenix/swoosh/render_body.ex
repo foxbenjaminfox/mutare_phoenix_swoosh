@@ -9,7 +9,7 @@ defmodule Mutare.Phoenix.Swoosh.RenderBody do
   built, addressed, and delivered with no rendered body at all:
 
       render_body(email, :welcome, %{name: name})  ->  email
-      email |> render_body(:welcome)               ->  Elixir.Function.identity()
+      email |> render_body(:welcome)               ->  email
 
   A survivor means no test asserts the rendered body content — the mail pipeline is exercised,
   but nothing checks that `html_body`/`text_body` ever got set.
@@ -43,11 +43,10 @@ defmodule Mutare.Phoenix.Swoosh.RenderBody do
   `[render_body:text_only]` / `[render_body:format]`, or the family with
   `# mutare:ignore[render_body]`.
 
-  Mutations apply only to the supported effective arities — `render_body/2,3` (`/2` is the
-  `use`-injected wrapper's default-assigns form) and `put_new_formats/2` — so a name-matched call of any other
-  arity is left alone, keeping every metamutant compiling. Piped calls are removed with the
-  `Elixir.Function.identity()` no-op stage (the `:Elixir`-led alias is never rewritten by alias
-  resolution, so the no-op always names the real `Function.identity/1`).
+  Mutations apply only to the supported arities — `render_body/2,3` (`/2` is the
+  `use`-injected wrapper's default-assigns form) and `put_new_formats/2` — so a name-matched
+  call of any other arity is left alone, keeping every metamutant compiling. A piped call is
+  the same call with the email piped in, and its removal collapses the stage to that email.
 
   ## How the three kinds relate
 
@@ -59,7 +58,7 @@ defmodule Mutare.Phoenix.Swoosh.RenderBody do
 
   ## The template and format positions are pinned
 
-  The template name (effective argument 1 — atom or string) is a structural identifier, not a
+  The template name (argument 1 — atom or string) is a structural identifier, not a
   computed value: a perturbed name is a missing-template crash at render time (an
   uninformative crash-kill), never a signal. `put_new_formats/2`'s extension→field map is the
   same kind of value — a perturbed extension key is a missing template, a perturbed field value
@@ -113,7 +112,6 @@ defmodule Mutare.Phoenix.Swoosh.RenderBody do
   alias Mutare.AST
   alias Mutare.Calls
   alias Mutare.CallRouting.Call
-  alias Mutare.Mutator
   alias Mutare.Mutator.Mutation
   alias Mutare.Phoenix.Swoosh.AST, as: PSAST
   alias Mutare.Phoenix.Swoosh.Routes
@@ -128,31 +126,26 @@ defmodule Mutare.Phoenix.Swoosh.RenderBody do
   @spec variants() :: [String.t()]
   def variants, do: ~w(remove html_only text_only format)
 
-  # Both real `render_body` arities with the template (effective argument 1) `:raw`, plus
+  # Both real `render_body` arities with the template (argument 1) `:raw`, plus
   # `put_new_formats/2` with its map `:raw` — the structural pins. Registration is also what
   # resolves the bare `/2` wrapper form and drops the bare-import witness (see the moduledoc).
   @impl Mutare.CallRouting
   @spec call_routes() :: [Mutare.CallRouting.route()]
   def call_routes, do: Routes.render_body() ++ Routes.formats()
 
-  # Never fires node-locally: whether removal returns the first arg (non-piped) or
-  # `Function.identity()` (piped) depends on pipe context, unknowable from the node.
-  @impl Mutare.Mutator
-  @spec mutate(Macro.t()) :: :skip
-  def mutate(_node), do: :skip
-
   # `Calls.resolved_routed_call/1` is the one reader that normalizes every written form this
-  # family matches — bare (registry-resolved), qualified, aliased, and piped — and carries the
-  # pipe context itself, so the threaded `context` is not consulted.
+  # family matches — bare (registry-resolved), qualified, aliased, and piped (a piped stage
+  # arrives as the direct call with the email at argument 0) — so nothing here needs the
+  # threaded context.
   @impl Mutare.Mutator
-  @spec mutate(Macro.t(), Mutator.context()) :: :skip | [Mutation.t()]
-  def mutate(node, _context) do
+  @spec mutate(Macro.t()) :: :skip | [Mutation.t()]
+  def mutate(node) do
     case Calls.resolved_routed_call(node) do
-      %Call{module: Phoenix.Swoosh, name: :render_body, effective_arity: arity} = call
-      when arity in [2, 3] ->
+      %Call{module: Phoenix.Swoosh, name: :render_body, arguments: args} = call
+      when length(args) in [2, 3] ->
         [removal(call) | narrowings(call)]
 
-      %Call{module: Phoenix.Swoosh, name: :put_new_formats, effective_arity: 2} = call ->
+      %Call{module: Phoenix.Swoosh, name: :put_new_formats, arguments: [_email, _formats]} = call ->
         present(format_drops(call))
 
       _other ->
@@ -160,8 +153,8 @@ defmodule Mutare.Phoenix.Swoosh.RenderBody do
     end
   end
 
-  # A piped stage becomes the identity no-op; a non-piped call collapses to its first argument
-  # (the email). The arity guard guarantees a non-piped call has that argument.
+  # The call collapses to its first argument (the email), in both spellings. The arity guard
+  # guarantees that argument exists.
   @spec removal(Call.t()) :: Mutation.t()
   defp removal(%Call{} = call) do
     Mutation.new(PSAST.collapse_to_email(call),
@@ -181,12 +174,11 @@ defmodule Mutare.Phoenix.Swoosh.RenderBody do
     end
   end
 
-  # The template is effective argument 1, so its visible index shifts under a pipe. `nil`,
-  # `true`, and `false` are excluded — atoms, but never templates (and `render_body/3` would
-  # not accept them as one).
+  # The template is argument 1 in both spellings. `nil`, `true`, and `false` are excluded —
+  # atoms, but never templates (and `render_body/3` would not accept them as one).
   @spec template_atom(Call.t()) :: atom() | nil
   defp template_atom(%Call{} = call) do
-    with {_index, node} <- PSAST.effective_arg(call, 1),
+    with {_index, node} <- PSAST.arg_at(call, 1),
          {:ok, atom} when is_atom(atom) and atom not in [nil, true, false] <-
            AST.literal_value(node) do
       atom
@@ -201,7 +193,7 @@ defmodule Mutare.Phoenix.Swoosh.RenderBody do
   # template and skips the other.
   @spec narrowed(Call.t(), atom(), String.t()) :: Mutation.t()
   defp narrowed(%Call{arguments: args, rebuild: rebuild} = call, atom, extension) do
-    {index, _template} = PSAST.effective_arg(call, 1)
+    {index, _template} = PSAST.arg_at(call, 1)
     narrowed_args = List.replace_at(args, index, AST.literal("#{atom}.#{extension}"))
 
     Mutation.new(PSAST.compact(rebuild.(:render_body, narrowed_args)),
@@ -219,7 +211,7 @@ defmodule Mutare.Phoenix.Swoosh.RenderBody do
   # cannot be rewritten, and the second's only drop is the `remove` mutant's diff.
   @spec format_drops(Call.t()) :: [Mutation.t()]
   defp format_drops(%Call{arguments: args, rebuild: rebuild} = call) do
-    with {index, node} <- PSAST.effective_arg(call, 1),
+    with {index, node} <- PSAST.arg_at(call, 1),
          {:ok, {_kind, entries, wrap}} <- PSAST.container(node),
          true <- length(entries) > 1 do
       for {entry, entry_index} <- Enum.with_index(entries) do

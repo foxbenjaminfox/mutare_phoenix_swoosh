@@ -1,7 +1,7 @@
 defmodule Mutare.Phoenix.Swoosh.LayoutTest do
   @moduledoc """
-  `:mail_layout` — removes a layout setter, pipe-aware: non-piped → the email, piped →
-  `Function.identity()` (`put` / `put_new`), and suppresses the layout at the render site by
+  `:mail_layout` — removes a layout setter (the call, or the pipe up to the stage, → the
+  email; `put` / `put_new`), and suppresses the layout at the render site by
   writing `layout: false` into `render_body`'s assigns (`off`), gated on a layout actually
   being in effect. The layout argument — tuple interior included — is pinned via the registry
   `:skip` routes. Setter removal works without the use-expansion extension (the setters are
@@ -54,9 +54,9 @@ defmodule Mutare.Phoenix.Swoosh.LayoutTest do
       assert layout_diffs(source) == [{"PS.put_new_layout(e, {LayoutV, :email})", "e"}]
     end
 
-    test "a piped stage becomes the identity no-op" do
+    test "a piped stage collapses to the piped email" do
       assert layout_diffs(mailer("  def go(e), do: e |> put_layout({LayoutV, :email})")) ==
-               [{"put_layout({LayoutV, :email})", "Elixir.Function.identity()"}]
+               [{"e |> put_layout({LayoutV, :email})", "e"}]
     end
 
     test "put_layout(email, false) is removed the same way" do
@@ -199,9 +199,13 @@ defmodule Mutare.Phoenix.Swoosh.LayoutTest do
       assert layout_diffs(source) == []
     end
 
-    test "node-local mutate/1 never fires (it has no pipe context)" do
-      assert Layout.mutate(Mutare.AST.parse!("Phoenix.Swoosh.put_layout(e, {LayoutV, :email})")) ==
-               :skip
+    # `off` reads the enclosing module's `use` line from the context, so the family produces
+    # through `mutate/2` alone; and it reads the call through its route stamp, so an unstamped
+    # node (one parsed outside the transform) yields nothing.
+    test "produces only through mutate/2, and only on a stamped node" do
+      refute function_exported?(Layout, :mutate, 1)
+
+      assert node_mutations("Phoenix.Swoosh.put_layout(e, {LayoutV, :email})", Layout) == []
     end
   end
 

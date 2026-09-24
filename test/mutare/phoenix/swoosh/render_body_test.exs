@@ -1,6 +1,6 @@
 defmodule Mutare.Phoenix.Swoosh.RenderBodyTest do
   @moduledoc """
-  `:render_body` — whole-call removal (non-piped → the email, piped → `Function.identity()`),
+  `:render_body` — whole-call removal (the call, or the pipe up to the stage, → the email),
   atom-template narrowing to the two string forms, and per-entry dropping of a literal
   `put_new_formats/2` map, across bare (`use`-style, both wrapper arities), qualified, aliased,
   and piped call sites; the template and format positions' registry `:skip` pins with their
@@ -58,19 +58,21 @@ defmodule Mutare.Phoenix.Swoosh.RenderBodyTest do
              ]
     end
 
-    test "a piped stage becomes the identity no-op" do
+    # A removal moves the piped email, so it is diffed over the pipe; a narrowing leaves the
+    # email where it is, so it is diffed at the stage alone.
+    test "a piped stage collapses to the piped email; its narrowings stay at the stage" do
       assert rb_diffs(mailer("  def go(e), do: e |> render_body(:welcome, %{})")) == [
-               {"render_body(:welcome, %{})", "Elixir.Function.identity()"},
+               {"e |> render_body(:welcome, %{})", "e"},
                {"render_body(:welcome, %{})", ~s|render_body("welcome.html", %{})|},
                {"render_body(:welcome, %{})", ~s|render_body("welcome.text", %{})|}
              ]
     end
 
-    test "a mid-chain stage is still removed" do
+    test "a mid-chain stage is removed with the chain upstream of it" do
       body = "  def go(e), do: e |> render_body(\"welcome.html\", %{}) |> deliver()"
 
       assert rb_diffs(mailer(body <> "\n  defp deliver(e), do: e")) ==
-               [{~s|render_body("welcome.html", %{})|, "Elixir.Function.identity()"}]
+               [{"e |> render_body(\"welcome.html\", %{})", "e"}]
     end
   end
 
@@ -250,9 +252,10 @@ defmodule Mutare.Phoenix.Swoosh.RenderBodyTest do
       assert rb_diffs(source) == []
     end
 
-    test "node-local mutate/1 never fires (it has no pipe context)" do
-      assert RenderBody.mutate(Mutare.AST.parse!("Phoenix.Swoosh.render_body(e, :welcome, a)")) ==
-               :skip
+    # The family reads the call through its route stamp, so an unstamped node (one parsed
+    # outside the transform) yields nothing.
+    test "mutate/1 fires only on a stamped node" do
+      assert node_mutations("Phoenix.Swoosh.render_body(e, :welcome, a)", RenderBody) == []
     end
   end
 

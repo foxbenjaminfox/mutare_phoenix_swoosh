@@ -9,7 +9,7 @@ defmodule Mutare.Phoenix.Swoosh.Layout do
 
       put_layout(email, {LayoutView, "email.html"})      ->  email
       put_new_layout(email, {LayoutView, :email})        ->  email
-      email |> put_layout({LayoutView, "email.html"})    ->  Elixir.Function.identity()
+      email |> put_layout({LayoutView, "email.html"})    ->  email
 
   `put` (`put_layout/2`) leaves the email with its previous layout, usually the
   `use`-configured one; `put_new` (`put_new_layout/2`) leaves the layout unset and the body
@@ -57,8 +57,8 @@ defmodule Mutare.Phoenix.Swoosh.Layout do
 
   Mutations apply only to the supported arities — both setters are `/2`, and `render_body` is
   `/2,3` (`/2` is the `use`-injected wrapper's default-assigns form) — so a name-matched call of
-  any other arity is left alone, keeping every metamutant compiling. Piped setter calls are removed with the
-  `Elixir.Function.identity()` no-op stage.
+  any other arity is left alone, keeping every metamutant compiling. A piped setter is the
+  same call with the email piped in, and its removal collapses the stage to that email.
 
   Matches direct (`Phoenix.Swoosh.put_layout(...)`), aliased, and bare-imported calls. Unlike
   `:render_body`, the setters' bare form needs no `use`-expansion override: they are genuine
@@ -136,26 +136,21 @@ defmodule Mutare.Phoenix.Swoosh.Layout do
   @spec call_routes() :: [Mutare.CallRouting.route()]
   def call_routes, do: Routes.layout_setters() ++ Routes.render_body()
 
-  # Never fires node-locally: whether removal returns the first arg (non-piped) or
-  # `Function.identity()` (piped) depends on pipe context, and `off` depends on the enclosing
-  # module's `use` line — neither is knowable from the node.
-  @impl Mutare.Mutator
-  @spec mutate(Macro.t()) :: :skip
-  def mutate(_node), do: :skip
-
-  # `Calls.resolved_routed_call/1` normalizes every written form (bare, qualified, aliased,
-  # piped) and carries the pipe context itself; the registered arities are matched in the head,
-  # so a wrong-arity qualified call — unregistered, hence unstamped — falls to `:skip`.
+  # Produces through `mutate/2` alone: `off` depends on the enclosing module's `use` line,
+  # read from `context.behaviours`. `Calls.resolved_routed_call/1` normalizes every written
+  # form (bare, qualified, aliased, piped — a piped stage arrives as the direct call with the
+  # email at argument 0); the registered arities are matched in the head, so a wrong-arity
+  # qualified call — unregistered, hence unstamped — falls to `:skip`.
   @impl Mutare.Mutator
   @spec mutate(Macro.t(), Mutator.context()) :: :skip | [Mutation.t()]
   def mutate(node, context) do
     case Calls.resolved_routed_call(node) do
-      %Call{module: Phoenix.Swoosh, name: name, effective_arity: 2} = call
+      %Call{module: Phoenix.Swoosh, name: name, arguments: [_email, _layout]} = call
       when name in [:put_layout, :put_new_layout] ->
         [removal(call, label(name))]
 
-      %Call{module: Phoenix.Swoosh, name: :render_body, effective_arity: arity} = call
-      when arity in [2, 3] ->
+      %Call{module: Phoenix.Swoosh, name: :render_body, arguments: args} = call
+      when length(args) in [2, 3] ->
         present(suppressions(node, call, layout_configured?(context)))
 
       _other ->
@@ -163,8 +158,8 @@ defmodule Mutare.Phoenix.Swoosh.Layout do
     end
   end
 
-  # A piped stage becomes the identity no-op; a non-piped call collapses to its first argument
-  # (the email). The arity match guarantees a non-piped call has that argument.
+  # The call collapses to its first argument (the email), in both spellings. The arity match
+  # guarantees that argument exists.
   @spec removal(Call.t(), String.t()) :: Mutation.t()
   defp removal(%Call{} = call, label) do
     Mutation.new(PSAST.collapse_to_email(call),
@@ -191,8 +186,8 @@ defmodule Mutare.Phoenix.Swoosh.Layout do
   # or add the entry when the `use` line configured a layout. An already-`false` entry yields
   # nothing — suppressing a layout that is already off is an equivalent mutant.
   @spec suppressions(Macro.t(), Call.t(), boolean()) :: [Mutation.t()]
-  defp suppressions(_node, %Call{effective_arity: 3} = call, configured?) do
-    {index, assigns} = PSAST.effective_arg(call, 2)
+  defp suppressions(_node, %Call{arguments: [_email, _template, _assigns]} = call, configured?) do
+    {index, assigns} = PSAST.arg_at(call, 2)
 
     case PSAST.container(assigns) do
       {:ok, {_kind, entries, wrap}} ->
@@ -210,14 +205,14 @@ defmodule Mutare.Phoenix.Swoosh.Layout do
   # through `Call.rebuild`, which would requalify the bare call at its new arity and so call
   # `Phoenix.Swoosh.render_body/3` *instead of* the wrapper that sets the view (see
   # `Mutare.Phoenix.Swoosh.AST.append_argument/2`).
-  defp suppressions(node, %Call{effective_arity: 2}, true) do
+  defp suppressions(node, %Call{arguments: [_email, _template]}, true) do
     case PSAST.append_argument(node, PSAST.map([PSAST.entry(:layout, false)])) do
       nil -> []
       appended -> [mutation(appended)]
     end
   end
 
-  defp suppressions(_node, %Call{effective_arity: 2}, false), do: []
+  defp suppressions(_node, %Call{arguments: [_email, _template]}, false), do: []
 
   # At most one mutant per call: the author's own `layout:` entry turned off, or — failing that
   # and only under a `use`-configured layout — a fresh one appended.
