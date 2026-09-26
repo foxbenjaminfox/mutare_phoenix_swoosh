@@ -7,10 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-26
+
 ### Changed
 
-- **Breaking: Mutare 0.4.0 and mutare_swoosh 0.2 or newer are required**
-  (`{:mutare, "~> 0.4.0"}`, `{:mutare_swoosh, "~> 0.2"}`). Mutare 0.4.0 hands a mutator a
+- **Breaking: Mutare 0.4.1 and mutare_swoosh 0.2 or newer are required**
+  (`{:mutare, "~> 0.4.1"}`, `{:mutare_swoosh, "~> 0.2"}`). Mutare 0.4.0 hands a mutator a
   pipe stage as the direct call it is sugar for, and the families read the email at
   argument 0 in both spellings; the `Function.identity()` no-op stage is gone.
 - **A removed pipe stage is diffed as the email it collapses to.** `email |> render_body(:welcome)`
@@ -87,5 +89,6 @@ Initial release.
   their reasons; and the README includes a verified recipe for pinning core's
   whole-assigns-map collapse per project.
 
-[Unreleased]: https://github.com/foxbenjaminfox/mutare_phoenix_swoosh/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/foxbenjaminfox/mutare_phoenix_swoosh/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/foxbenjaminfox/mutare_phoenix_swoosh/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/foxbenjaminfox/mutare_phoenix_swoosh/releases/tag/v0.1.0

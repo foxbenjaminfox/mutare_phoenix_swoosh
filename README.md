@@ -31,9 +31,9 @@ Add it (with Mutare and the base package) as dev/test dependencies:
 ```elixir
 def deps do
   [
-    {:mutare, "~> 0.4.0", only: [:dev, :test], runtime: false},
+    {:mutare, "~> 0.4.1", only: [:dev, :test], runtime: false},
     {:mutare_swoosh, "~> 0.2", only: [:dev, :test], runtime: false},
-    {:mutare_phoenix_swoosh, "~> 0.1", only: [:dev, :test], runtime: false}
+    {:mutare_phoenix_swoosh, "~> 0.2", only: [:dev, :test], runtime: false}
   ]
 end
 ```

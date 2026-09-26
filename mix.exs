@@ -1,7 +1,7 @@
 defmodule Mutare.Phoenix.Swoosh.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.2.0"
   @source_url "https://github.com/foxbenjaminfox/mutare_phoenix_swoosh"
 
   def project do
@@ -60,7 +60,7 @@ defmodule Mutare.Phoenix.Swoosh.MixProject do
       # `Swoosh.Email` module names so bare-import resolution reflects on real exports —
       # a real :phoenix_swoosh test dep would collide with them. Stub fidelity is
       # maintained against phoenix_swoosh's source by hand (see the stubs' comments).
-      {:mutare, "~> 0.4.0"},
+      {:mutare, "~> 0.4.1"},
       {:mutare_swoosh, "~> 0.2"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
