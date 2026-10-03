@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-03
+
+### Changed
+
+- Requires Mutare 0.5 (`{:mutare, "~> 0.5.0"}`) and `mutare_swoosh` 0.2.1.
+
 ## [0.2.0] - 2026-09-26
 
 ### Changed
@@ -89,6 +95,7 @@ Initial release.
   their reasons; and the README includes a verified recipe for pinning core's
   whole-assigns-map collapse per project.
 
-[Unreleased]: https://github.com/foxbenjaminfox/mutare_phoenix_swoosh/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/foxbenjaminfox/mutare_phoenix_swoosh/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/foxbenjaminfox/mutare_phoenix_swoosh/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/foxbenjaminfox/mutare_phoenix_swoosh/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/foxbenjaminfox/mutare_phoenix_swoosh/releases/tag/v0.1.0
