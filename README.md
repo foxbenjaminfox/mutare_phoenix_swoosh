@@ -201,14 +201,15 @@ a body is caught only by a body-content assertion. One of core's mutants there
 is a crash-kill rather than a signal, though: collapsing the whole assigns map
 to `%{}` causes an error on the first `@assign` the template reads. Route that
 one position `:interior` per-project if the noise bothers you — the map's own
-node is never offered, while everything inside it still mutates:
+node is never offered, while everything inside it still mutates. Your route
+replaces the registered route, so keep the template argument `:raw`.
 
 ```elixir
 # .mutare.exs
 [
   mutators: [:builtins] ++ Mutare.Swoosh.all(mailer: MyApp.Mailer) ++ Mutare.Phoenix.Swoosh.all(),
   extensions: [Mutare.Phoenix.Swoosh],
-  call_routes: [{Phoenix.Swoosh, :render_body, 3, [:expression, :expression, :interior]}]
+  call_routes: [{Phoenix.Swoosh, :render_body, 3, [:expression, :raw, :interior]}]
 ]
 ```
 
