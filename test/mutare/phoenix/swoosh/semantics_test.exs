@@ -152,6 +152,35 @@ defmodule Mutare.Phoenix.Swoosh.SemanticsTest do
     assert html_only.text_body == nil
   end
 
+  test "layout suppression accounts for duplicate keyword and computed map keys" do
+    source = """
+    defmodule DuplicateLayoutMailer do
+      use Phoenix.Swoosh, view: Sample.EmailView
+
+      def keyword(email, layout) do
+        render_body(email, "welcome.text", layout: false, layout: layout)
+      end
+
+      def map(email, key, layout) do
+        render_body(email, "welcome.text", %{:layout => layout, key => layout})
+      end
+    end
+    """
+
+    {[mod], sites} = compile_metamutant(source, [Layout], extensions: [Mutare.Phoenix.Swoosh])
+    email = Swoosh.Email.new()
+    layout = {Sample.LayoutView, :email}
+
+    for {pattern, render} <- [
+          {~r/layout: false/, fn -> mod.keyword(email, layout) end},
+          {~r/key => layout/, fn -> mod.map(email, :layout, layout) end}
+        ] do
+      assert render.().text_body == "rendered welcome.text in Sample.LayoutView:email.text"
+      id = site_id(sites, {pattern, ~r/false/})
+      assert with_active_mutant(id, render).text_body == "rendered welcome.text"
+    end
+  end
+
   test "an active layout-removal mutant leaves the layout where it was" do
     source = """
     defmodule LayoutMailer do

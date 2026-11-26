@@ -63,18 +63,10 @@ defmodule Mutare.Phoenix.Swoosh.AST do
   def pair?({_key, _value}), do: true
   def pair?(_entry), do: false
 
-  # The entry's key as an atom (`nil` for a string-keyed or computed key).
-  @spec key(Macro.t()) :: atom() | nil
-  def key({key, _value}), do: AST.key_atom(key)
-  def key(_entry), do: nil
-
   # The entry's key as its literal value, whatever its type (`"html"`, `:layout`).
   @spec literal_key(Macro.t()) :: {:ok, term()} | :error
   def literal_key({key, _value}), do: AST.literal_value(key)
   def literal_key(_entry), do: :error
-
-  @spec replace_value(Macro.t(), Macro.t()) :: Macro.t()
-  def replace_value({key, _value}, new_value), do: {key, new_value}
 
   @spec entry(atom(), term()) :: Macro.t()
   def entry(key, value) when is_atom(key), do: {AST.keyword_key(key), AST.literal(value)}

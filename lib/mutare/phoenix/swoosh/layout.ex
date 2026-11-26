@@ -189,14 +189,9 @@ defmodule Mutare.Phoenix.Swoosh.Layout do
   defp suppressions(_node, %Call{arguments: [_email, _template, _assigns]} = call, configured?) do
     {index, assigns} = PSAST.arg_at(call, 2)
 
-    case PSAST.container(assigns) do
-      {:ok, {_kind, entries, wrap}} ->
-        entries
-        |> override_entries(configured?)
-        |> Enum.map(&suppression(call, index, wrap.(&1)))
-
-      :error ->
-        if configured?, do: [suppression(call, index, forced_off(assigns))], else: []
+    case override_assigns(assigns, configured?) do
+      {:ok, overridden} -> [suppression(call, index, overridden)]
+      :skip -> []
     end
   end
 
@@ -214,24 +209,52 @@ defmodule Mutare.Phoenix.Swoosh.Layout do
 
   defp suppressions(_node, %Call{arguments: [_email, _template]}, false), do: []
 
-  # At most one mutant per call: the author's own `layout:` entry turned off, or — failing that
-  # and only under a `use`-configured layout — a fresh one appended.
-  @spec override_entries([Macro.t()], boolean()) :: [[Macro.t()]]
-  defp override_entries(entries, configured?) do
-    case Enum.find_index(entries, &(PSAST.key(&1) == :layout)) do
-      nil ->
-        if configured?, do: [entries ++ [PSAST.entry(:layout, false)]], else: []
-
-      index ->
-        entry = Enum.at(entries, index)
-
-        if PSAST.false_literal?(value(entry)),
-          do: [],
-          else: [List.replace_at(entries, index, PSAST.replace_value(entry, AST.literal(false)))]
+  @spec override_assigns(Macro.t(), boolean()) :: {:ok, Macro.t()} | :skip
+  defp override_assigns(assigns, configured?) do
+    with {:ok, {_kind, entries, wrap}} <- PSAST.container(assigns),
+         {:ok, updated} <- override_entries(entries, configured?) do
+      {:ok, wrap.(updated)}
+    else
+      :ambiguous -> {:ok, forced_off(assigns)}
+      :error when configured? -> {:ok, forced_off(assigns)}
+      _other -> :skip
     end
   end
 
-  defp value({_key, value}), do: value
+  @spec override_entries([Macro.t()], boolean()) :: {:ok, [Macro.t()]} | :ambiguous | :skip
+  defp override_entries(entries, configured?) do
+    case effective_layout(entries) do
+      :missing when configured? ->
+        {:ok, entries ++ [PSAST.entry(:layout, false)]}
+
+      :missing ->
+        :skip
+
+      {index, {key, value}, shadowed?} ->
+        cond do
+          PSAST.false_literal?(value) -> :skip
+          shadowed? -> :ambiguous
+          true -> {:ok, List.replace_at(entries, index, {key, AST.literal(false)})}
+        end
+    end
+  end
+
+  # Phoenix.Swoosh uses Enum.into(assigns, %{}), so the last literal layout key wins. A
+  # computed key after it shadows it: the key might be `:layout` at runtime, so rewriting the
+  # literal entry alone might not turn the layout off. A literal `false` still yields nothing,
+  # since the mutant differs only if the computed key turns out to be `:layout`.
+  @spec effective_layout([Macro.t()]) :: :missing | {non_neg_integer(), Macro.t(), boolean()}
+  defp effective_layout(entries) do
+    entries
+    |> Enum.with_index()
+    |> Enum.reduce(:missing, fn {entry, index}, previous ->
+      case {PSAST.literal_key(entry), previous} do
+        {{:ok, :layout}, _previous} -> {index, entry, false}
+        {:error, {layout_index, layout, _shadowed?}} -> {layout_index, layout, true}
+        _other -> previous
+      end
+    end)
+  end
 
   # A computed assigns argument (a variable, a call) is normalized the way phoenix_swoosh
   # normalizes it itself — `Enum.into(assigns, %{})` accepts the map and the keyword list the

@@ -124,6 +124,29 @@ defmodule Mutare.Phoenix.Swoosh.LayoutTest do
       assert layout_diffs(source, @ext) == []
     end
 
+    test "a last layout key set to false makes earlier entries irrelevant" do
+      source =
+        mailer("  def go(e, layout), do: render_body(e, :welcome, layout: layout, layout: false)")
+
+      assert layout_diffs(source, @ext) == []
+    end
+
+    test "a last literal layout set to false yields nothing even before a computed key" do
+      body = "  def go(e, k, v), do: render_body(e, :welcome, %{:layout => false, k => v})"
+
+      for source <- [mailer(body), branded(body)] do
+        assert layout_diffs(source, @ext) == []
+      end
+    end
+
+    test "a computed key after a truthy layout forces the layout off over the whole map" do
+      source =
+        mailer("  def go(e, l, k, v), do: render_body(e, :welcome, %{:layout => l, k => v})")
+
+      assert [{_original, mutated}] = layout_diffs(source, @ext)
+      assert mutated =~ "Map.put(Elixir.Enum.into(%{:layout => l, k => v}, %{}), :layout, false)"
+    end
+
     test "no layout in effect yields nothing" do
       source = mailer("  def go(e, name), do: render_body(e, :welcome, %{name: name})")
 
