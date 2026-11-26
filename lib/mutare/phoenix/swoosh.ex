@@ -10,8 +10,8 @@ defmodule Mutare.Phoenix.Swoosh do
   ## Families
 
     * `Mutare.Phoenix.Swoosh.RenderBody` — `:render_body`: remove a `render_body/2,3` call
-      (the email is sent with no rendered body), narrow an atom template to one of its two string
-      forms (only the `.html` / only the `.text` body renders), or drop one entry from a
+      (the email is sent with no rendered body), narrow an atom template using the standard
+      HTML and text formats to one of its string forms, or drop one entry from a
       literal `put_new_formats/2` map (that extension stops rendering).
     * `Mutare.Phoenix.Swoosh.Layout` — `:mail_layout`: remove a `put_layout/2` /
       `put_new_layout/2` call (the body renders in the previous/no layout), or suppress the
@@ -75,7 +75,7 @@ defmodule Mutare.Phoenix.Swoosh do
   @behaviour Mutare.UseExpansion
 
   alias Mutare.AST
-  alias Mutare.Phoenix.Swoosh.{Layout, LayoutConfigured, RenderBody}
+  alias Mutare.Phoenix.Swoosh.{FormatsConfigured, Layout, LayoutConfigured, RenderBody}
 
   @doc """
   This package's two phoenix_swoosh mutator families — `RenderBody`, `Layout`.
@@ -120,12 +120,23 @@ defmodule Mutare.Phoenix.Swoosh do
 
   defp template_root?(_args), do: false
 
-  # The `layout:` option's *presence*, carried to `Mutare.Phoenix.Swoosh.Layout` as a marker
-  # "behaviour" (see `Mutare.Phoenix.Swoosh.LayoutConfigured`). A computed value — a module
-  # attribute, a function call — counts as configured: it is a layout the author put there.
-  # Only a literal `layout: false`, phoenix_swoosh's own default, counts as none.
-  defp markers(args), do: if(layout_configured?(args), do: [LayoutConfigured], else: [])
+  defp markers(args) do
+    for {configured?, marker} <- [
+          {layout_configured?(args), LayoutConfigured},
+          {formats_configured?(args), FormatsConfigured}
+        ],
+        configured?,
+        do: marker
+  end
 
+  # A wrapper can set formats unless the option is absent or literally nil.
+  defp formats_configured?([opts]) when is_list(opts),
+    do: AST.literal_value(AST.opts_get(opts, :formats)) != {:ok, nil}
+
+  defp formats_configured?([]), do: false
+  defp formats_configured?(_args), do: true
+
+  # A computed layout counts as configured. Only the literal false default disables it.
   defp layout_configured?([opts]) when is_list(opts) do
     case AST.opts_get(opts, :layout) do
       nil -> false

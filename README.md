@@ -72,7 +72,7 @@ mix mutare
 
 | Family | Name | Mutation | The gap a survivor exposes |
 | --- | --- | --- | --- |
-| `Mutare.Phoenix.Swoosh.RenderBody` | `:render_body` | removes a `render_body/2,3` call (`remove` — the email is sent with no rendered body); narrows a literal atom template to one of its string forms (`html_only` / `text_only` — only that body part renders); drops one entry from a literal `put_new_formats/2` map (`format` — that extension stops rendering) | no test asserts the rendered body, or tests assert only *one* of the body parts |
+| `Mutare.Phoenix.Swoosh.RenderBody` | `:render_body` | removes a `render_body/2,3` call (`remove` — the email is sent with no rendered body); narrows a literal atom template using the standard HTML and text formats to one of its string forms (`html_only` / `text_only`); drops one entry from a literal `put_new_formats/2` map (`format` — that extension stops rendering) | no test asserts the rendered body, or tests assert only *one* of the body parts |
 | `Mutare.Phoenix.Swoosh.Layout` | `:mail_layout` | removes `put_layout/2` (`put`) / `put_new_layout/2` (`put_new`), collapsing to the email; sets the `layout:` assign of a `render_body` call to `false` (`off` — the body renders with no layout at all) | no test asserts which layout wrapped the rendered body |
 
 Each family matches its call written qualified
@@ -80,6 +80,13 @@ Each family matches its call written qualified
 `use Phoenix.Swoosh` produces — the wrapper's default-assigns `render_body/2`
 included), or as a pipe stage, and every replacement is itself a valid
 phoenix_swoosh program — a survivor means a missing assertion, not a crash.
+
+The `html_only` and `text_only` mutants check the incoming email's formats.
+They raise when the email uses different formats: no narrowing exists there,
+and a mutant that rendered the atom unchanged would survive every test.
+Reports show them at the template, as `:welcome` → `"welcome.html"`.
+Bare `render_body` calls whose `use Phoenix.Swoosh` sets `formats:` to a value
+other than literal `nil` get only the removal variant.
 
 Both families also *pin* phoenix_swoosh's structural argument positions
 against Mutare's built-in value families: the template name, the layout tuple

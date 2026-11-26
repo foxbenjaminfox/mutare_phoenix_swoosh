@@ -53,15 +53,49 @@ defmodule Mutare.Phoenix.Swoosh.SemanticsTest do
     assert baseline.html_body == "rendered welcome.html"
     assert baseline.text_body == "rendered welcome.text"
 
-    html_id = site_id(sites, {~r/render_body/, ~r/"welcome\.html"/})
+    html_id = site_id(sites, {":welcome", ~s|"welcome.html"|})
     html_only = with_active_mutant(html_id, fn -> mod.welcome(Swoosh.Email.new()) end)
     assert html_only.html_body == "rendered welcome.html"
     assert html_only.text_body == nil
 
-    text_id = site_id(sites, {~r/render_body/, ~r/"welcome\.text"/})
+    text_id = site_id(sites, {":welcome", ~s|"welcome.text"|})
     text_only = with_active_mutant(text_id, fn -> mod.welcome(Swoosh.Email.new()) end)
     assert text_only.html_body == nil
     assert text_only.text_body == "rendered welcome.text"
+  end
+
+  test "narrowings raise under runtime format overrides and evaluate a piped email once" do
+    source = """
+    defmodule RuntimeFormatsMailer do
+      use Phoenix.Swoosh, view: Sample.EmailView
+
+      def welcome(make_email), do: make_email.() |> render_body(:welcome)
+    end
+    """
+
+    {[mod], sites} =
+      compile_metamutant(source, [RenderBody], extensions: [Mutare.Phoenix.Swoosh])
+
+    for formats <- [%{"txt" => :text_body}, %{"html" => :text_body, "text" => :html_body}] do
+      email = Phoenix.Swoosh.put_new_formats(Swoosh.Email.new(), formats)
+
+      for variant <- ["html_only", "text_only"] do
+        %{id: id} = Enum.find(sites, &(&1.variant == [variant]))
+        message = ~r/render_body:#{variant} mutant: .* standard "html"\/"text" formats/
+
+        assert_raise RuntimeError, message, fn ->
+          with_active_mutant(id, fn ->
+            mod.welcome(fn ->
+              send(self(), :make_email)
+              email
+            end)
+          end)
+        end
+
+        assert_received :make_email
+        refute_received :make_email
+      end
+    end
   end
 
   test "an active layout-off mutant renders the body outside its use-configured layout" do

@@ -14,17 +14,22 @@ defmodule Mutare.Phoenix.Swoosh.RenderBody do
   A survivor means no test asserts the rendered body content — the mail pipeline is exercised,
   but nothing checks that `html_body`/`text_body` ever got set.
 
-  **Atom-template narrowing** (labels `html_only` / `text_only`) — an atom template renders
-  *both* the `.html` and the `.text` template; the string form renders exactly one. Narrowing
-  the literal atom to each string form drops the other body part:
+  **Atom-template narrowing** (labels `html_only` / `text_only`) — with Phoenix.Swoosh's
+  standard HTML and text formats, an atom template renders both parts and the string form
+  renders exactly one. The mutant checks the incoming email's format configuration before
+  rendering `"welcome.html"` or `"welcome.text"` in place of `:welcome`, and raises when the
+  email has different formats: no narrowing exists there, and a mutant that rendered the atom
+  unchanged would survive every test. Reports show only the substituted template:
 
-      render_body(email, :welcome, assigns)  ->  render_body(email, "welcome.html", assigns)
-                                             ->  render_body(email, "welcome.text", assigns)
+      render_body(email, :welcome, assigns)  ->  :welcome  ->  "welcome.html"
+                                             ->  :welcome  ->  "welcome.text"
 
   A survivor means no test asserts the *other* body part. Use
   `Swoosh.TestAssertions.assert_email_sent/1` on both bodies, or a direct assertion such as
   `email.text_body =~ ...`, to kill it. Narrowing applies only to a literal atom template;
-  a string or computed template gets the removal mutant alone.
+  a string or computed template gets the removal mutant alone. A bare wrapper with a
+  non-`nil` or computed `formats:` option also gets only removal, since the wrapper can set
+  formats after the mutant checks the email.
 
   **Format dropping** (label `format`) — a literal `put_new_formats/2` map with more than one
   entry loses one entry per mutant, so that extension's template stops rendering:
@@ -33,11 +38,8 @@ defmodule Mutare.Phoenix.Swoosh.RenderBody do
         ->  put_new_formats(email, %{"amp" => :html_body})
         ->  put_new_formats(email, %{"html" => :html_body})
 
-  This is the custom-formats form of the same gap the narrowings probe — and the *only* form of
-  it once a mailer configures `:formats`, since the narrowings' `.html`/`.text` extensions may
-  not exist there (a narrowed mutant then causes a missing-template crash: an uninformative
-  kill, never a wrong survivor). A single-entry map produces nothing: dropping the only format
-  renders no body at all, duplicating the `remove` mutation.
+  Format dropping can probe custom extensions. A single-entry map produces nothing: dropping
+  the only format renders no body at all, duplicating the `remove` mutation.
 
   Suppress one kind with `# mutare:ignore[render_body:remove]` / `[render_body:html_only]` /
   `[render_body:text_only]` / `[render_body:format]`, or the family with
@@ -112,9 +114,12 @@ defmodule Mutare.Phoenix.Swoosh.RenderBody do
   alias Mutare.AST
   alias Mutare.Calls
   alias Mutare.CallRouting.Call
+  alias Mutare.Mutator
   alias Mutare.Mutator.Mutation
   alias Mutare.Phoenix.Swoosh.AST, as: PSAST
-  alias Mutare.Phoenix.Swoosh.Routes
+  alias Mutare.Phoenix.Swoosh.{FormatsConfigured, Routes}
+
+  @default_formats %{"html" => :html_body, "text" => :text_body}
 
   @impl Mutare.Mutator
   @spec name() :: :render_body
@@ -135,15 +140,14 @@ defmodule Mutare.Phoenix.Swoosh.RenderBody do
 
   # `Calls.resolved_routed_call/1` is the one reader that normalizes every written form this
   # family matches — bare (registry-resolved), qualified, aliased, and piped (a piped stage
-  # arrives as the direct call with the email at argument 0) — so nothing here needs the
-  # threaded context.
+  # arrives as the direct call with the email at argument 0).
   @impl Mutare.Mutator
-  @spec mutate(Macro.t()) :: :skip | [Mutation.t()]
-  def mutate(node) do
+  @spec mutate(Macro.t(), Mutator.context()) :: :skip | [Mutation.t()]
+  def mutate(node, context) do
     case Calls.resolved_routed_call(node) do
       %Call{module: Phoenix.Swoosh, name: :render_body, arguments: args} = call
       when length(args) in [2, 3] ->
-        [removal(call) | narrowings(call)]
+        [removal(call) | narrowings(call, context)]
 
       %Call{module: Phoenix.Swoosh, name: :put_new_formats, arguments: [_email, _formats]} = call ->
         present(format_drops(call))
@@ -163,43 +167,87 @@ defmodule Mutare.Phoenix.Swoosh.RenderBody do
     )
   end
 
-  # The two narrowings, only for a literal plain-atom template (`:welcome` — the render-both
-  # form). A string template already renders one part, and a computed template can't be
-  # narrowed by rewriting; both get the removal mutant alone.
-  @spec narrowings(Call.t()) :: [Mutation.t()]
-  defp narrowings(%Call{} = call) do
-    case template_atom(call) do
-      nil -> []
-      atom -> Enum.map(["html", "text"], &narrowed(call, atom, &1))
+  @spec narrowings(Call.t(), Mutator.context()) :: [Mutation.t()]
+  defp narrowings(call, context) do
+    with false <- wrapper_formats_configured?(call, context),
+         {_node, _atom} = template <- template_atom(call) do
+      Enum.map(["html", "text"], &narrowed(call, template, &1))
+    else
+      _other -> []
     end
   end
 
-  # The template is argument 1 in both spellings. `nil`, `true`, and `false` are excluded —
-  # atoms, but never templates (and `render_body/3` would not accept them as one).
-  @spec template_atom(Call.t()) :: atom() | nil
+  # A bare wrapper can set formats after the mutant inspects its input email.
+  # A qualified call goes straight to Phoenix.Swoosh, so only the email's formats matter.
+  defp wrapper_formats_configured?(%Call{node: {:render_body, _, _}}, context),
+    do: MapSet.member?(Map.get(context, :behaviours, MapSet.new()), FormatsConfigured)
+
+  defp wrapper_formats_configured?(%Call{}, _context), do: false
+
+  # The template is argument 1 in both spellings, returned with its written node. `nil`,
+  # `true`, and `false` are excluded — atoms, but never templates (and `render_body/3` would
+  # not accept them as one).
+  @spec template_atom(Call.t()) :: {Macro.t(), atom()} | nil
   defp template_atom(%Call{} = call) do
     with {_index, node} <- PSAST.arg_at(call, 1),
          {:ok, atom} when is_atom(atom) and atom not in [nil, true, false] <-
            AST.literal_value(node) do
-      atom
+      {node, atom}
     else
       _other -> nil
     end
   end
 
-  # Rebuild the call in its written form (`Call.rebuild` preserves bare/qualified/aliased)
-  # with the atom template replaced by one of its string forms — exactly the template the
-  # atom form would have rendered for that extension, so the mutant renders one real
-  # template and skips the other.
-  @spec narrowed(Call.t(), atom(), String.t()) :: Mutation.t()
-  defp narrowed(%Call{arguments: args, rebuild: rebuild} = call, atom, extension) do
-    {index, _template} = PSAST.arg_at(call, 1)
-    narrowed_args = List.replace_at(args, index, AST.literal("#{atom}.#{extension}"))
+  # The spliced node binds the email once and checks its formats at runtime, but the report
+  # shows only the template the mutant substitutes: `:welcome` -> `"welcome.html"`.
+  @spec narrowed(Call.t(), {Macro.t(), atom()}, String.t()) :: Mutation.t()
+  defp narrowed(
+         %Call{arguments: [email, _template | assigns], rebuild: rebuild},
+         {node, atom},
+         extension
+       ) do
+    email_var = Macro.var(:render_email, __MODULE__)
+    narrowed = AST.literal("#{atom}.#{extension}")
+    variant = "#{extension}_only"
+    call = rebuild.(:render_body, [email_var, narrowed | assigns])
 
-    Mutation.new(PSAST.compact(rebuild.(:render_body, narrowed_args)),
-      variant: "#{extension}_only",
-      note: "template narrowed to .#{extension} - no test asserts the #{other(extension)} body"
+    replacement =
+      quote generated: true do
+        unquote(email_var) = unquote(email)
+        unquote(standard_formats_check(email_var, variant))
+        unquote(call)
+      end
+
+    Mutation.new(replacement,
+      variant: variant,
+      note: "template narrowed to .#{extension} - no test asserts the #{other(extension)} body",
+      attribution: Mutation.at(node, narrowed)
     )
+  end
+
+  # The string form bypasses Phoenix.Swoosh's extension list, so it narrows the atom form only
+  # when both standard parts would render into their standard fields. Under any other formats
+  # no narrowing exists, and rendering the atom instead would be an equivalent mutant that
+  # always survives. Raising makes it an uninformative kill rather than a false survivor.
+  defp standard_formats_check(email, variant) do
+    message =
+      "Mutare render_body:#{variant} mutant: the email does not use the standard " <>
+        "\"html\"/\"text\" formats, so this narrowing does not apply"
+
+    quote generated: true do
+      case unquote(email).private do
+        %{phoenix_extensions: extensions}
+        when extensions not in [["html", "text"], ["text", "html"]] ->
+          raise unquote(message)
+
+        %{phoenix_extensions_to_body_key: formats}
+        when formats != unquote(Macro.escape(@default_formats)) ->
+          raise unquote(message)
+
+        _ ->
+          :ok
+      end
+    end
   end
 
   @spec other(String.t()) :: String.t()

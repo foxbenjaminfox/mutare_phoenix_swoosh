@@ -27,10 +27,8 @@ defmodule Mutare.Phoenix.Swoosh.RenderBodyTest do
 
       assert rb_diffs(source) == [
                {"Phoenix.Swoosh.render_body(e, :welcome, a)", "e"},
-               {"Phoenix.Swoosh.render_body(e, :welcome, a)",
-                "Phoenix.Swoosh.render_body(e, \"welcome.html\", a)"},
-               {"Phoenix.Swoosh.render_body(e, :welcome, a)",
-                "Phoenix.Swoosh.render_body(e, \"welcome.text\", a)"}
+               {":welcome", ~s|"welcome.html"|},
+               {":welcome", ~s|"welcome.text"|}
              ]
     end
 
@@ -53,18 +51,18 @@ defmodule Mutare.Phoenix.Swoosh.RenderBodyTest do
     test "a bare use-style call at the wrapper's default-assigns arity (/2)" do
       assert rb_diffs(mailer("  def go(e), do: render_body(e, :welcome)")) == [
                {"render_body(e, :welcome)", "e"},
-               {"render_body(e, :welcome)", ~s|render_body(e, "welcome.html")|},
-               {"render_body(e, :welcome)", ~s|render_body(e, "welcome.text")|}
+               {":welcome", ~s|"welcome.html"|},
+               {":welcome", ~s|"welcome.text"|}
              ]
     end
 
-    # A removal moves the piped email, so it is diffed over the pipe; a narrowing leaves the
-    # email where it is, so it is diffed at the stage alone.
-    test "a piped stage collapses to the piped email; its narrowings stay at the stage" do
+    # A removal moves the piped email, so it is diffed over the pipe; a narrowing is reported
+    # at the template it substitutes.
+    test "a piped stage collapses to the piped email; its narrowings read at the template" do
       assert rb_diffs(mailer("  def go(e), do: e |> render_body(:welcome, %{})")) == [
                {"e |> render_body(:welcome, %{})", "e"},
-               {"render_body(:welcome, %{})", ~s|render_body("welcome.html", %{})|},
-               {"render_body(:welcome, %{})", ~s|render_body("welcome.text", %{})|}
+               {":welcome", ~s|"welcome.html"|},
+               {":welcome", ~s|"welcome.text"|}
              ]
     end
 
@@ -104,9 +102,23 @@ defmodule Mutare.Phoenix.Swoosh.RenderBodyTest do
       end
       """
 
-      assert {"PS.render_body(e, :welcome, a)", ~s|PS.render_body(e, "welcome.html", a)|} in rb_diffs(
-               source
-             )
+      assert [{"PS.render_body(e, :welcome, a)", "e"}, {":welcome", ~s|"welcome.html"|}, _] =
+               rb_diffs(source)
+    end
+
+    test "a wrapper with a configured format gets only removal" do
+      for formats <- [~s|%{"txt" => :text_body}|, "@formats"],
+          call <- ["render_body(e, :welcome)", "e |> render_body(:welcome)"] do
+        source = """
+        defmodule M do
+          @formats %{"txt" => :text_body}
+          use Phoenix.Swoosh, view: Sample.EmailView, formats: #{formats}
+          def go(e), do: #{call}
+        end
+        """
+
+        assert rb_diffs(source) == [{call, "e"}]
+      end
     end
   end
 
@@ -115,8 +127,9 @@ defmodule Mutare.Phoenix.Swoosh.RenderBodyTest do
       source = mailer("  def go(e, n), do: render_body(e, :welcome, %{name: n})")
       mutators = [Mutare.Mutators.AtomLiteral, Mutare.Mutators.StringLiteral, RenderBody]
 
-      refute Enum.any?(diffs(source, mutators, @ext), fn {_family, original, _mutated} ->
-               original in [":welcome", "\"welcome.html\""]
+      # This family's own narrowings are reported at the template; no other family is.
+      refute Enum.any?(diffs(source, mutators, @ext), fn {family, original, _mutated} ->
+               family != :render_body and original in [":welcome", "\"welcome.html\""]
              end)
     end
 
@@ -254,7 +267,7 @@ defmodule Mutare.Phoenix.Swoosh.RenderBodyTest do
 
     # The family reads the call through its route stamp, so an unstamped node (one parsed
     # outside the transform) yields nothing.
-    test "mutate/1 fires only on a stamped node" do
+    test "mutate/2 fires only on a stamped node" do
       assert node_mutations("Phoenix.Swoosh.render_body(e, :welcome, a)", RenderBody) == []
     end
   end

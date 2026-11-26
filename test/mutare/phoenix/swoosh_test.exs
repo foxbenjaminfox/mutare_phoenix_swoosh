@@ -8,7 +8,7 @@ defmodule Mutare.Phoenix.SwooshTest do
 
   import Mutare.Test
 
-  alias Mutare.Phoenix.Swoosh.{Layout, LayoutConfigured, RenderBody}
+  alias Mutare.Phoenix.Swoosh.{FormatsConfigured, Layout, LayoutConfigured, RenderBody}
   alias Mutare.UseExpansion.Expansion
 
   doctest Mutare.Phoenix.Swoosh
@@ -31,7 +31,7 @@ defmodule Mutare.Phoenix.SwooshTest do
     test "adds import Phoenix.View for the standalone template_root: style" do
       args = [quote(do: [template_root: "./templates"])]
 
-      assert %Expansion{directives: directives} =
+      assert %Expansion{directives: directives, behaviours: []} =
                Mutare.Phoenix.Swoosh.expand_use(Phoenix.Swoosh, args, context())
 
       assert Enum.map(directives, &Macro.to_string/1) ==
@@ -47,7 +47,7 @@ defmodule Mutare.Phoenix.SwooshTest do
     test "computed use options fall back to the base import pair (no Phoenix.View)" do
       args = [quote(do: mailer_opts())]
 
-      assert %Expansion{directives: directives} =
+      assert %Expansion{directives: directives, behaviours: [FormatsConfigured]} =
                Mutare.Phoenix.Swoosh.expand_use(Phoenix.Swoosh, args, context())
 
       assert Enum.map(directives, &Macro.to_string/1) ==
@@ -78,9 +78,8 @@ defmodule Mutare.Phoenix.SwooshTest do
     test "no layout option, or phoenix_swoosh's own `false` default, reports nothing" do
       absent = [quote(do: [view: Sample.EmailView])]
       explicit = [quote(do: [view: Sample.EmailView, layout: false])]
-      computed_opts = [quote(do: mailer_opts())]
 
-      for args <- [absent, explicit, computed_opts] do
+      for args <- [absent, explicit] do
         assert %Expansion{behaviours: []} =
                  Mutare.Phoenix.Swoosh.expand_use(Phoenix.Swoosh, args, context())
       end
