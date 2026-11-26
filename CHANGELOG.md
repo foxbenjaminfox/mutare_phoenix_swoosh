@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The `html_only` / `text_only` narrowings check the email's formats at runtime.** A
+  narrowed template bypasses Phoenix.Swoosh's extension list, so under custom formats it could
+  render a missing template or set the wrong body field. The mutant now picks the string
+  template only when the email uses the standard `"html"`/`"text"` formats and body fields,
+  and raises otherwise: no narrowing exists under other formats, and a mutant that rendered
+  the atom unchanged would survive every test.
+- **A bare `render_body` in a mailer whose `use Phoenix.Swoosh` sets `formats:` gets only the
+  `remove` mutant.** The `use`-injected wrapper applies those formats after the mutant reads
+  the email. A `formats:` option that is absent or literally `nil` keeps both narrowings.
+- **Narrowings are reported at the template they substitute:** `:welcome` → `"welcome.html"`,
+  where the diff read `render_body(e, :welcome, a)` → `render_body(e, "welcome.html", a)`.
+
+### Fixed
+
+- **The `off` layout mutant targets the `layout:` assign that takes effect.** Phoenix.Swoosh
+  merges assigns with `Enum.into/2`, so the last `layout` key wins; the mutant read the first.
+  `layout: false, layout: layout` got no mutant, and `layout: layout, layout: false` got an
+  equivalent one. When a computed map key follows the last literal `:layout` key, the mutant
+  forces the layout off over the whole map, since the computed key might be `:layout` at runtime.
+- **The README's `:interior` routing example keeps the template argument `:raw`.** A
+  project-level route replaces this package's registered one, and the example's
+  `:expression` exposed the template name to core's value families.
+
 ## [0.2.1] - 2026-10-03
 
 ### Changed
