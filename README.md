@@ -221,17 +221,23 @@ the site to suppress these mutations inside the assigns map, or leave them enabl
 
 ## Development
 
-The test suite runs against
-stand-in `Phoenix.Swoosh`/`Swoosh.Email` modules
-(`test/support/phoenix_swoosh_stubs.ex`) that mirror the real API — the
-`__using__` with its `except:` import and local wrapper included — kept
-faithful by hand, since a real `:phoenix_swoosh` test dep would collide with
-them.
+The unit suite uses stand-in `Phoenix.Swoosh` and `Swoosh.Email` modules in
+`test/support/phoenix_swoosh_stubs.ex`. The fixture in
+`integration/phoenix_swoosh` runs selected mutants against the real renderer
+with EEx templates. CI runs both suites.
 
 ```
 mix deps.get
 mix test          # unit diffs + live semantic checks that a mutant actually changes behaviour
 mix check         # format + credo + dialyzer
+```
+
+Run the renderer fixture from its own Mix project.
+
+```sh
+cd integration/phoenix_swoosh
+mix deps.get --check-locked
+mix test
 ```
 
 ## License

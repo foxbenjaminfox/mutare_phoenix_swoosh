@@ -1,6 +1,8 @@
 /_build/
 /cover/
 /deps/
+/integration/phoenix_swoosh/_build/
+/integration/phoenix_swoosh/deps/
 /doc/
 /.fetch
 /.elixir_ls/
